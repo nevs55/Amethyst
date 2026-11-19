@@ -1,0 +1,46 @@
+name: Package Amethyst preview
+on:
+  push:
+    branches: [build/per-display-default-layout]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: brew bundle
+      - name: Build universal Release app
+        run: |
+          set -o pipefail
+          xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/build" \
+            ONLY_ACTIVE_ARCH=NO 'ARCHS=arm64 x86_64' CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION=131 build | xcbeautify
+      - name: Package and verify the app
+        run: |
+          set -eu
+          stage="$RUNNER_TEMP/preview"
+          mkdir -p "$stage"
+          app="$stage/Amethyst.app"
+          ditto "$RUNNER_TEMP/build/Build/Products/Release/Amethyst.app" "$app"
+          /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool false' "$app/Contents/Info.plist"
+          codesign --force --deep --sign - "$app"
+          ln -s /Applications "$stage/Applications"
+          image=Amethyst-per-display-preview.dmg
+          hdiutil create -quiet -volname 'Amethyst Preview' -srcfolder "$stage" -format UDZO "$image"
+          mount="$RUNNER_TEMP/verify-preview"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$image"
+          trap 'hdiutil detach "$mount"' EXIT
+          app="$mount/Amethyst.app"
+          codesign --verify --deep --strict --verbose "$app"
+          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/Amethyst"
+          "$app/Contents/MacOS/Amethyst" --help
+          shasum -a 256 "$image"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Amethyst-per-display-preview
+          path: Amethyst-per-display-preview.dmg
+          compression-level: 0
+          if-no-files-found: error
