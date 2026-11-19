@@ -301,7 +301,7 @@ extension WindowManager {
             .addObservers()
             .subscribe(
                 onError: { [weak self] error in
-                    if case ApplicationObservation<WindowManager>.Error.observationFailed(AXError.apiDisabled.rawValue) = error {
+                    if (error as? AXObservationError)?.code == .apiDisabled {
                         self?.deniedApplicationPIDs.insert(application.pid())
                     }
                 },

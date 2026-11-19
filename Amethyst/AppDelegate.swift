@@ -24,7 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyManager: HotKeyManager<SIApplication>?
     private var permissionTimer: Timer?
     private let disposeBag = DisposeBag()
-    private let permissionMenuItem = NSMenuItem(title: "Check Window Access…", action: #selector(checkWindowAccess(_:)), keyEquivalent: "")
+    private let permissionMenuItem = NSMenuItem(title: "Check Window Access…", action: #selector(AppDelegate.checkWindowAccess(_:)), keyEquivalent: "")
 
     private(set) var statusItem: NSStatusItem?
     private var layoutMenuScreen: NSScreen?
@@ -288,10 +288,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         screenManager.selectLayout(at: sender.tag, matching: layoutKey)
     }
 
-    deinit {
-        permissionTimer?.invalidate()
-    }
-
     @objc private func checkWindowAccess(_ sender: NSMenuItem) {
         let alert = NSAlert()
         alert.messageText = "Window Access"
@@ -329,7 +325,11 @@ extension AppDelegate: NSMenuDelegate {
             let frontApp = NSWorkspace.shared.frontmostApplication
             let target = frontApp?.isManageable == .manageable ? frontApp : nil
             permissionMenuItem.representedObject = target
-            permissionMenuItem.title = target?.localizedName.map { "Check Window Access for \($0)…" } ?? "Check Window Access…"
+            if let name = target?.localizedName {
+                permissionMenuItem.title = "Check Window Access for \(name)…"
+            } else {
+                permissionMenuItem.title = "Check Window Access…"
+            }
             let mouse = NSEvent.mouseLocation
             layoutMenuScreen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? statusItem?.button?.window?.screen
             UserConfiguration.shared.refreshAccessibilityPermissions()
@@ -367,7 +367,11 @@ extension AppDelegate: UserConfigurationDelegate {
         }
         guard userConfiguration.hasAccessibilityPermissions else {
             if permissionTimer == nil {
-                let timer = Timer(timeInterval: 1, repeats: true) { _ in
+                let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
+                    guard self != nil else {
+                        timer.invalidate()
+                        return
+                    }
                     userConfiguration.refreshAccessibilityPermissions()
                 }
                 RunLoop.main.add(timer, forMode: .common)

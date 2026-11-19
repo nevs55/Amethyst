@@ -17,7 +17,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -derivedDataPath "$RUNNER_TEMP/build" \
-            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 90 test | xcbeautify
+            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 90 test
           xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -derivedDataPath "$RUNNER_TEMP/build" \
             -only-testing:AmethystTests/TallWindowCloseTests -test-iterations 3 \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 90 test-without-building | xcbeautify

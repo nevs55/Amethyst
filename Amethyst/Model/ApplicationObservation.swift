@@ -11,6 +11,10 @@ import Cocoa
 import Foundation
 import RxSwift
 
+struct AXObservationError: Swift.Error {
+    let code: AXError
+}
+
 /// Delegate for handling application observer events.
 protocol ApplicationObservationDelegate: AnyObject {
     associatedtype Application: ApplicationType
@@ -92,15 +96,6 @@ protocol ApplicationObservationDelegate: AnyObject {
 struct ApplicationObservation<Delegate: ApplicationObservationDelegate> {
     typealias Application = Delegate.Application
     typealias Window = Application.Window
-
-    /// Errors when attempting to add observers to applications
-    enum Error: Swift.Error {
-        /// General failure
-        case failed
-
-        /// Failure in the accessibility observation
-        case observationFailed(error: Int32)
-    }
 
     /// Notifications that are observed
     private enum Notification {
@@ -200,7 +195,7 @@ struct ApplicationObservation<Delegate: ApplicationObservationDelegate> {
     func addObservers() -> Observable<Void> {
         return _addObservers(notifications: Notification.applicationNotifications).retry { errorTrigger in
             errorTrigger.enumerated().flatMap { count, error -> Observable<Int> in
-                if case Error.observationFailed(AXError.apiDisabled.rawValue) = error {
+                if (error as? AXObservationError)?.code == .apiDisabled {
                     return .error(error)
                 }
                 guard count < 6 else {
@@ -299,7 +294,7 @@ struct ApplicationObservation<Delegate: ApplicationObservationDelegate> {
         case .notificationAlreadyRegistered:
             return
         default:
-            throw Error.observationFailed(error: success.rawValue)
+            throw AXObservationError(code: success)
         }
     }
 
