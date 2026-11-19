@@ -64,12 +64,19 @@ jobs:
           hdiutil attach -readonly -nobrowse -mountpoint "$old" "$old.dmg"
           sudo ditto "$old/Amethyst.app" /Applications/Amethyst.app
           hdiutil detach "$old"
+          defaults write com.amethyst.Amethyst display-layout-defaults -dict external tall
           /bin/bash Update-Amethyst-133.command | tee "$RUNNER_TEMP/upgrade.log"
           backup=$(sed -n 's/^Previous app saved at //p' "$RUNNER_TEMP/upgrade.log")
           plist=/usr/libexec/PlistBuddy
           test "$("$plist" -c 'Print CFBundleVersion' "$backup/Contents/Info.plist")" = 132
           test "$("$plist" -c 'Print CFBundleVersion' /Applications/Amethyst.app/Contents/Info.plist)" = 133
           test "$("$plist" -c 'Print CFBundleIdentifier' /Applications/Amethyst.app/Contents/Info.plist)" = com.github.nevs55.AmethystPreview
+          # Preferences are imported by the launched menu-bar app on its first run.
+          for attempt in {1..30}; do
+            defaults read com.github.nevs55.AmethystPreview display-layout-defaults 2>/dev/null | grep -q tall && break
+            sleep 1
+          done
+          defaults read com.github.nevs55.AmethystPreview display-layout-defaults | grep -q tall
       - uses: actions/upload-artifact@v4
         with:
           name: Amethyst-per-display-preview

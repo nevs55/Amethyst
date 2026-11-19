@@ -221,7 +221,14 @@ class ScreenManagerTests: QuickSpec {
                     windows[3].id(): CGRect(x: 1920, y: 800, width: 1920, height: 800)
                 ]
                 let duringClose = tracker.windowSet(forActiveWindowsOnScreen: screen)
-                layout.frameAssignments(duringClose, on: screen)!.verify(frames: expected)
+                let assignments = layout.frameAssignments(duringClose, on: screen)!
+                assignments.verify(frames: expected)
+                let queue = OperationQueue()
+                queue.addOperations(assignments, waitUntilFinished: false)
+                for window in [windows[0], windows[2], windows[3]] {
+                    expect(window.frame()).toEventually(equal(expected[window.id()]!))
+                }
+                expect(windows[1].frame()).to(equal(.zero))
                 tracker.remove(window: windows[1])
                 let afterClose = tracker.windowSet(forActiveWindowsOnScreen: screen)
                 layout.frameAssignments(afterClose, on: screen)!.verify(frames: expected)
