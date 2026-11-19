@@ -22,6 +22,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     fileprivate var windowManager: WindowManager<SIApplication>?
     private var hotKeyManager: HotKeyManager<SIApplication>?
+    private var permissionTimer: Timer?
+    private let permissionMenuItem = NSMenuItem(title: "Waiting for window-control permission", action: nil, keyEquivalent: "")
 
     fileprivate var statusItem: NSStatusItem?
     @IBOutlet var statusItemMenu: NSMenu?
@@ -44,8 +46,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         log.info("Logging is enabled")
         log.debug("Debug logging is enabled")
 
-        UserConfiguration.shared.delegate = self
         UserConfiguration.shared.load()
+        UserConfiguration.shared.delegate = self
         UserConfiguration.shared.tilingEnabled = !UserConfiguration.shared.startWithTilingDisabled()
 
         #if RELEASE
@@ -65,7 +67,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         preferencesWindowController?.window?.level = .floating
+        configurationAccessibilityPermissionsDidChange(UserConfiguration.shared)
+    }
 
+    func startWindowManagement() {
         if let encodedWindowManager = UserDefaults.standard.data(forKey: AppDelegate.windowManagerEncodingKey), UserConfiguration.shared.restoreLayoutsOnLaunch() {
             let decoder = JSONDecoder()
             windowManager = try? decoder.decode(WindowManager<SIApplication>.self, from: encodedWindowManager)
@@ -81,6 +86,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     override func awakeFromNib() {
         super.awakeFromNib()
 
+        if Bundle.main.bundleIdentifier == "com.github.nevs55.AmethystPreview" {
+            Self.importPreviewPreferences()
+        }
         let version = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "unknown"
         let shortVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
         let statusItemImage = NSImage(named: "icon-statusitem")
@@ -89,6 +97,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem?.image = statusItemImage
         statusItem?.menu = statusItemMenu
+        permissionMenuItem.isHidden = true
+        statusItemMenu?.insertItem(permissionMenuItem, at: 1)
         statusItem?.highlightMode = true
 
         let hideMenuBarIcon: Bool = UserConfiguration.shared.hideMenuBarIcon()
@@ -101,6 +111,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Set up status item menu delegate to refresh layouts when main menu is opened
         statusItemMenu?.delegate = self
+    }
+
+    private static func importPreviewPreferences() {
+        let defaults = UserDefaults.standard
+        let marker = "importedOriginalAmethystPreferences"
+        guard !defaults.bool(forKey: marker) else { return }
+        let original = defaults.persistentDomain(forName: "com.amethyst.Amethyst") ?? [:]
+        for (key, value) in original where defaults.object(forKey: key) == nil {
+            if ConfigurationKey(rawValue: key) != nil || CommandKey(rawValue: key) != nil ||
+                key.hasPrefix("KeyboardShortcuts_") || key.hasPrefix("migrated-") ||
+                key == windowManagerEncodingKey || key == "disable-dotfile-conflict-warning" {
+                defaults.set(value, forKey: key)
+            }
+        }
+        defaults.set(true, forKey: marker)
     }
 
     /// Opening Amethyst while it is already running, from the Finder, Spotlight or `open`, shows Preferences, since the app has no Dock icon or main window to come forward.
@@ -266,6 +291,7 @@ extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         // Refresh layouts menu when main status item menu is about to open
         if menu == statusItemMenu {
+            UserConfiguration.shared.refreshAccessibilityPermissions()
             populateLayoutsMenu()
         }
     }
@@ -286,6 +312,23 @@ extension AppDelegate: UserConfigurationDelegate {
     }
 
     func configurationAccessibilityPermissionsDidChange(_ userConfiguration: UserConfiguration) {
-        windowManager?.reevaluateWindows()
+        permissionMenuItem.isHidden = userConfiguration.hasAccessibilityPermissions
+        guard userConfiguration.hasAccessibilityPermissions else {
+            if permissionTimer == nil {
+                let timer = Timer(timeInterval: 1, repeats: true) { _ in
+                    userConfiguration.refreshAccessibilityPermissions()
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                permissionTimer = timer
+            }
+            return
+        }
+        permissionTimer?.invalidate()
+        permissionTimer = nil
+        if let windowManager {
+            windowManager.reevaluateWindows()
+        } else {
+            startWindowManagement()
+        }
     }
 }

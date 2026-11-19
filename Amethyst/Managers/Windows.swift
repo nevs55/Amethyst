@@ -17,6 +17,15 @@ final class TrackedWindows<Window: WindowType> {
     private var activeIDCache: Set<CGWindowID> = Set()
     private var deactivatedPIDs: Set<pid_t> = Set()
     private var floatingMap: [Window.WindowID: Bool] = [:]
+    private let onScreenIDs: () -> Set<CGWindowID>?
+    private let spaceForWindow: (Window) -> Int?
+
+    init(onScreenIDs: @escaping () -> Set<CGWindowID>? = {
+        CGWindowsInfo<Window>(options: .optionOnScreenOnly, windowID: 0)?.activeIDs()
+    }, spaceForWindow: @escaping (Window) -> Int? = CGWindowsInfo<Window>.windowSpace) {
+        self.onScreenIDs = onScreenIDs
+        self.spaceForWindow = spaceForWindow
+    }
 
     // MARK: Window Filters
 
@@ -43,7 +52,7 @@ final class TrackedWindows<Window: WindowType> {
         }
 
         let screenWindows = windows.filter { window in
-            let space = CGWindowsInfo.windowSpace(window)
+            let space = spaceForWindow(window)
 
             guard let windowScreen = window.screen(), currentSpace.id == space else {
                 return false
@@ -210,8 +219,7 @@ final class TrackedWindows<Window: WindowType> {
     }
 
     func regenerateActiveIDCache() {
-        let windowDescriptions = CGWindowsInfo<Window>(options: .optionOnScreenOnly, windowID: CGWindowID(0))
-        activeIDCache = windowDescriptions?.activeIDs() ?? Set()
+        activeIDCache = onScreenIDs() ?? []
     }
 
     // MARK: Window Sets
@@ -221,6 +229,8 @@ final class TrackedWindows<Window: WindowType> {
     }
 
     func windowSet(forActiveWindowsOnScreen screen: Screen) -> WindowSet<Window> {
+        // A close can change the visible set before the AX destroy notification arrives.
+        regenerateActiveIDCache()
         return windowSet(forWindows: activeWindows(onScreen: screen))
     }
 

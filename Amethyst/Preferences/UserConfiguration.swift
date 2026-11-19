@@ -279,12 +279,16 @@ class UserConfiguration: NSObject {
     }
 
     func load() {
-        let hasAccessibilityPermissions = confirmAccessibilityPermissions()
-        if self.hasAccessibilityPermissions != hasAccessibilityPermissions {
-            self.hasAccessibilityPermissions = hasAccessibilityPermissions
-        }
+        refreshAccessibilityPermissions(using: confirmAccessibilityPermissions)
         loadConfigurationFile()
         loadConfiguration()
+    }
+
+    func refreshAccessibilityPermissions(using check: () -> Bool = AXIsProcessTrusted) {
+        let granted = check()
+        if granted != hasAccessibilityPermissions {
+            hasAccessibilityPermissions = granted
+        }
     }
 
     func loadConfiguration() {
@@ -483,13 +487,8 @@ class UserConfiguration: NSObject {
                 return
             }
 
-            let hasAccessibilityPermissions = self.confirmAccessibilityPermissions()
-
-            if self.hasAccessibilityPermissions != hasAccessibilityPermissions {
-                self.hasAccessibilityPermissions = hasAccessibilityPermissions
-            }
-
-            guard hasAccessibilityPermissions else {
+            self.refreshAccessibilityPermissions(using: self.confirmAccessibilityPermissions)
+            guard self.hasAccessibilityPermissions else {
                 return
             }
 

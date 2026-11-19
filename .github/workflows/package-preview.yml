@@ -1,12 +1,14 @@
 name: Package Amethyst preview
 on:
   push:
-    branches: [build/per-display-default-layout]
+    branches: [build/per-display-default-layout, fix/preview-close-reflow]
 permissions:
   contents: read
 jobs:
   package:
-    runs-on: macos-latest
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: Install build dependencies
@@ -21,7 +23,7 @@ jobs:
           xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/build" \
             ONLY_ACTIVE_ARCH=NO 'ARCHS=arm64 x86_64' CODE_SIGNING_ALLOWED=NO \
-            CURRENT_PROJECT_VERSION=132 build | xcbeautify
+            CURRENT_PROJECT_VERSION=133 build | xcbeautify
       - name: Package and verify the app
         run: |
           set -eu
@@ -29,10 +31,12 @@ jobs:
           mkdir -p "$stage"
           app="$stage/Amethyst.app"
           ditto "$RUNNER_TEMP/build/Build/Products/Release/Amethyst.app" "$app"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.github.nevs55.AmethystPreview' "$app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Amethyst Preview' "$app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool false' "$app/Contents/Info.plist"
           codesign --force --deep --sign - "$app"
           ln -s /Applications "$stage/Applications"
-          image=Amethyst-preview-132.dmg
+          image=Amethyst-preview-133.dmg
           hdiutil create -quiet -volname 'Amethyst Preview' -srcfolder "$stage" -format UDZO "$image"
           mount="$RUNNER_TEMP/verify-preview"
           hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$image"
@@ -40,13 +44,37 @@ jobs:
           app="$mount/Amethyst.app"
           codesign --verify --deep --strict --verbose "$app"
           lipo "$app/Contents/MacOS/Amethyst" -verify_arch arm64 x86_64
-          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = 132
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = 133
           "$app/Contents/MacOS/Amethyst" debug windows --redact-window-titles > "$RUNNER_TEMP/windows-report.txt"
           grep -q '^Accessibility access for this diagnostic:' "$RUNNER_TEMP/windows-report.txt"
-          shasum -a 256 "$image"
+          test "$(/usr/libexec/PlistBuddy -c 'Print DTSDKName' "$app/Contents/Info.plist")" = macosx27.0
+          codesign -dvv "$app" 2>&1 | grep -Fx 'Identifier=com.github.nevs55.AmethystPreview'
+          digest=$(shasum -a 256 "$image" | awk '{print $1}')
+          sed "s/__DMG_SHA256__/$digest/" packaging/Update-Amethyst-133.command.in > Update-Amethyst-133.command
+          chmod +x Update-Amethyst-133.command
+          bash -n Update-Amethyst-133.command
+      - name: Exercise the build 132 upgrade
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          test ! -e /Applications/Amethyst.app
+          old="$RUNNER_TEMP/build-132"
+          curl -fsSL https://github.com/nevs55/Amethyst/releases/download/per-display-preview.2/Amethyst-preview-132.dmg -o "$old.dmg"
+          echo "5937371d33b56ae755fadbe2864898ec79e8ff8a8682e1c7a63b59cd5b90c867  $old.dmg" | shasum -a 256 -c -
+          hdiutil attach -readonly -nobrowse -mountpoint "$old" "$old.dmg"
+          sudo ditto "$old/Amethyst.app" /Applications/Amethyst.app
+          hdiutil detach "$old"
+          /bin/bash Update-Amethyst-133.command | tee "$RUNNER_TEMP/upgrade.log"
+          backup=$(sed -n 's/^Previous app saved at //p' "$RUNNER_TEMP/upgrade.log")
+          plist=/usr/libexec/PlistBuddy
+          test "$("$plist" -c 'Print CFBundleVersion' "$backup/Contents/Info.plist")" = 132
+          test "$("$plist" -c 'Print CFBundleVersion' /Applications/Amethyst.app/Contents/Info.plist)" = 133
+          test "$("$plist" -c 'Print CFBundleIdentifier' /Applications/Amethyst.app/Contents/Info.plist)" = com.github.nevs55.AmethystPreview
       - uses: actions/upload-artifact@v4
         with:
           name: Amethyst-per-display-preview
-          path: Amethyst-preview-132.dmg
+          path: |
+            Amethyst-preview-133.dmg
+            Update-Amethyst-133.command
           compression-level: 0
           if-no-files-found: error
