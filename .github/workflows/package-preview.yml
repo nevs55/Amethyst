@@ -57,6 +57,22 @@ jobs:
           sed "s/__DMG_SHA256__/$digest/" packaging/Update-Amethyst-133.command.in > Update-Amethyst-133.command
           chmod +x Update-Amethyst-133.command
           bash -n Update-Amethyst-133.command
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Amethyst-per-display-preview
+          path: |
+            Amethyst-preview-133.dmg
+            Update-Amethyst-133.command
+          compression-level: 0
+          if-no-files-found: error
+
+  upgrade:
+    needs: package
+    runs-on: xcode-27
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Amethyst-per-display-preview
       - name: Exercise the build 132 upgrade
         timeout-minutes: 3
         run: |
@@ -68,6 +84,7 @@ jobs:
           hdiutil attach -readonly -nobrowse -mountpoint "$old" "$old.dmg"
           sudo ditto "$old/Amethyst.app" /Applications/Amethyst.app
           hdiutil detach "$old"
+          open /Applications/Amethyst.app
           defaults write com.amethyst.Amethyst display-layout-defaults -dict external tall
           /bin/bash Update-Amethyst-133.command | tee "$RUNNER_TEMP/upgrade.log"
           backup=$(sed -n 's/^Previous app saved at //p' "$RUNNER_TEMP/upgrade.log")
@@ -81,11 +98,3 @@ jobs:
             sleep 1
           done
           defaults read com.github.nevs55.AmethystPreview display-layout-defaults | grep -q tall
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Amethyst-per-display-preview
-          path: |
-            Amethyst-preview-133.dmg
-            Update-Amethyst-133.command
-          compression-level: 0
-          if-no-files-found: error

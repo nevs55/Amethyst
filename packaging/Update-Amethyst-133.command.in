@@ -46,25 +46,36 @@ if [[ -e "$installed" ]]; then
     echo "Current installed build: $(build_number "$installed")"
 fi
 
-quit_tilers() {
-    /usr/bin/osascript -l JavaScript - <<'JXA'
+running_tilers() {
+    /usr/bin/osascript -l JavaScript - "$1" "$installed" "$HOME/Applications/Amethyst Test 130/Amethyst.app" <<'JXA'
 ObjC.import('AppKit');
-function run() {
-    const ids = ['com.amethyst.Amethyst', 'com.github.nevs55.AmethystPreview'];
-    const running = id => $.NSRunningApplication.runningApplicationsWithBundleIdentifier(id);
-    for (const id of ids) {
-        const apps = running(id);
+function run(args) {
+    const path = url => ObjC.unwrap(url.URLByResolvingSymlinksInPath.path);
+    const targets = args.slice(1).map(p => path($.NSURL.fileURLWithPath(p)));
+    const remaining = [];
+    for (const id of ['com.amethyst.Amethyst', 'com.github.nevs55.AmethystPreview']) {
+        const apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier(id);
         for (let i = 0; i < apps.count; i++) {
-            if (!apps.objectAtIndex(i).terminate) throw Error('Quit Amethyst from its menu and run the updater again.');
+            const app = apps.objectAtIndex(i);
+            const actual = path(app.bundleURL);
+            if (targets.indexOf(actual) < 0) continue;
+            remaining.push(actual);
+            if (args[0] === 'quit' && !app.terminate) throw Error('Quit ' + actual + ' and run the updater again.');
         }
     }
-    for (let attempt = 0; attempt < 100; attempt++) {
-        if (ids.every(id => running(id).count === 0)) return;
-        $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.1));
-    }
-    throw Error('Amethyst is still running. Quit it from its menu and run the updater again.');
+    return remaining.join(', ');
 }
 JXA
+}
+quit_tilers() {
+    local pending attempt
+    pending=$(running_tilers quit)
+    for ((attempt=0; attempt<60; attempt++)); do
+        [[ -z "$pending" ]] && return 0
+        /bin/sleep 0.25
+        pending=$(running_tilers inspect)
+    done
+    [[ -z "$pending" ]] || { echo "Quit the running copy at $pending and run the updater again."; return 1; }
 }
 
 if ! verify_preview "$installed" 2>/dev/null; then
