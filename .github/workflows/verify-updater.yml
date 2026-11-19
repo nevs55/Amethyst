@@ -1,0 +1,31 @@
+name: Verify build 132 in-place upgrade
+on:
+  push:
+    branches: [verify/updater-132]
+permissions:
+  contents: read
+jobs:
+  install:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upgrade installed build 131 to build 132
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          assets=https://github.com/nevs55/Amethyst/releases/download
+          curl -fsSLo old.dmg "$assets/per-display-preview.1/Amethyst-per-display-preview.dmg"
+          curl -fsSLO "$assets/per-display-preview.2/Amethyst-preview-132.dmg"
+          test ! -e /Applications/Amethyst.app
+          hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/old-preview" old.dmg
+          sudo ditto "$RUNNER_TEMP/old-preview/Amethyst.app" /Applications/Amethyst.app
+          hdiutil detach "$RUNNER_TEMP/old-preview"
+          sudo chown -R "$(id -u)" /Applications/Amethyst.app
+          build() { /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$1/Contents/Info.plist"; }
+          test "$(build /Applications/Amethyst.app)" = 131
+          cp "$GITHUB_WORKSPACE/packaging/Update-Amethyst-132-v2.command" .
+          /bin/bash Update-Amethyst-132-v2.command | tee upgrade.log
+          test "$(build /Applications/Amethyst.app)" = 132
+          backup=$(sed -n 's/^Previous app saved at //p' upgrade.log)
+          test "$(build "$backup")" = 131
+          grep -q '^Accessibility access for this diagnostic:' upgrade.log
