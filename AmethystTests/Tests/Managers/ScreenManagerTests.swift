@@ -11,6 +11,7 @@ import Nimble
 import Quick
 import Silica
 import SwiftyJSON
+import XCTest
 
 private final class PermissionTestAppDelegate: AppDelegate {
     var starts = 0
@@ -194,46 +195,6 @@ class ScreenManagerTests: QuickSpec {
                 expect(app.starts).to(equal(1))
             }
 
-            it("fills the top-right gap even when the closed window is still tracked") {
-                let screen = TestScreen(frame: CGRect(x: 0, y: 0, width: 3840, height: 1600), id: "external")
-                let previousDescriptions = TestScreen.descriptions
-                defer { TestScreen.descriptions = previousDescriptions }
-                TestScreen.descriptions = [JSON(["Display Identifier": "external", "Current Space": ["ManagedSpaceID": 1, "type": 0, "uuid": "space"]])]
-                let windows = (1...4).map { id -> TestWindow in
-                    let window = TestWindow(element: nil)!
-                    window.cgWindowID = CGWindowID(id)
-                    window.testScreen = screen
-                    return window
-                }
-                var visible = Set(windows.map { $0.cgID() })
-                let tracker = TrackedWindows<TestWindow>(onScreenIDs: { visible }, spaceForWindow: { _ in 1 })
-                windows.forEach { tracker.add(window: $0, atFront: false) }
-                let layout = TallLayout<TestWindow>()
-                let original = tracker.windowSet(forActiveWindowsOnScreen: screen)
-                let before = layout.frameAssignments(original, on: screen)!
-                expect(before.count).to(equal(4))
-                expect(before.dropFirst().first?.frameAssignment.frame).to(equal(CGRect(x: 1920, y: 0, width: 1920, height: 533)))
-
-                visible.remove(windows[1].cgID())
-                let expected = [
-                    windows[0].id(): CGRect(x: 0, y: 0, width: 1920, height: 1600),
-                    windows[2].id(): CGRect(x: 1920, y: 0, width: 1920, height: 800),
-                    windows[3].id(): CGRect(x: 1920, y: 800, width: 1920, height: 800)
-                ]
-                let duringClose = tracker.windowSet(forActiveWindowsOnScreen: screen)
-                let assignments = layout.frameAssignments(duringClose, on: screen)!
-                assignments.verify(frames: expected)
-                let queue = OperationQueue()
-                queue.addOperations(assignments, waitUntilFinished: false)
-                for window in [windows[0], windows[2], windows[3]] {
-                    expect(window.frame()).toEventually(equal(expected[window.id()]!))
-                }
-                expect(windows[1].frame()).to(equal(.zero))
-                tracker.remove(window: windows[1])
-                let afterClose = tracker.windowSet(forActiveWindowsOnScreen: screen)
-                layout.frameAssignments(afterClose, on: screen)!.verify(frames: expected)
-            }
-
             it("forgets destroyed windows even after tab replacement") {
                 let windows = TrackedWindows<TestWindow>()
                 let closing = TestWindow(element: nil)!
@@ -409,6 +370,55 @@ class ScreenManagerTests: QuickSpec {
                     expect((decodedLayouts.last as? TallLayout<TestWindow>)?.mainPaneCount).to(equal(2))
                 }
             }
+        }
+    }
+}
+
+final class TallWindowCloseTests: XCTestCase {
+    @MainActor func testClosingTopRightResizesRemainingWindowsBeforeDestroyNotification() async throws {
+        let screen = TestScreen(frame: CGRect(x: 0, y: 0, width: 3840, height: 1600), id: "external")
+        let previousDescriptions = TestScreen.descriptions
+        defer { TestScreen.descriptions = previousDescriptions }
+        TestScreen.descriptions = [JSON(["Display Identifier": "external", "Current Space": ["ManagedSpaceID": 1, "type": 0, "uuid": "space"]])]
+        let windows = (1...4).map { id -> TestWindow in
+            let window = TestWindow(element: nil)!
+            window.cgWindowID = CGWindowID(id)
+            window.testScreen = screen
+            return window
+        }
+        var visible = Set(windows.map { $0.cgID() })
+        let tracker = TrackedWindows<TestWindow>(onScreenIDs: { visible }, spaceForWindow: { _ in 1 })
+        windows.forEach { tracker.add(window: $0, atFront: false) }
+        let layout = TallLayout<TestWindow>()
+        let original = tracker.windowSet(forActiveWindowsOnScreen: screen)
+        let before = try XCTUnwrap(layout.frameAssignments(original, on: screen))
+        XCTAssertEqual(before.count, 4)
+        XCTAssertEqual(before.dropFirst().first?.frameAssignment.frame, CGRect(x: 1920, y: 0, width: 1920, height: 533))
+
+        visible.remove(windows[1].cgID())
+        let expected = [
+            windows[0].id(): CGRect(x: 0, y: 0, width: 1920, height: 1600),
+            windows[2].id(): CGRect(x: 1920, y: 0, width: 1920, height: 800),
+            windows[3].id(): CGRect(x: 1920, y: 800, width: 1920, height: 800)
+        ]
+        let duringClose = tracker.windowSet(forActiveWindowsOnScreen: screen)
+        let assignments = try XCTUnwrap(layout.frameAssignments(duringClose, on: screen))
+        XCTAssertEqual(assignments.count, 3)
+        let queue = OperationQueue()
+        await withCheckedContinuation { (finished: CheckedContinuation<Void, Never>) in
+            queue.addOperations(assignments, waitUntilFinished: false)
+            queue.addBarrierBlock { finished.resume() }
+        }
+        for window in [windows[0], windows[2], windows[3]] {
+            XCTAssertEqual(window.frame(), expected[window.id()])
+        }
+        XCTAssertEqual(windows[1].frame(), .zero)
+        tracker.remove(window: windows[1])
+        let afterClose = tracker.windowSet(forActiveWindowsOnScreen: screen)
+        let after = try XCTUnwrap(layout.frameAssignments(afterClose, on: screen))
+        XCTAssertEqual(after.count, 3)
+        for operation in after {
+            XCTAssertEqual(operation.frameAssignment.frame, expected[operation.frameAssignment.window.id])
         }
     }
 }
