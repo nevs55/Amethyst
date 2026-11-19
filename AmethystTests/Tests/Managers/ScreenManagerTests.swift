@@ -425,13 +425,13 @@ final class StatusLayoutsMenuTests: XCTestCase {
         config.setLayoutKeys(["wide", "tall", "wide"])
         root.delegate?.menuNeedsUpdate?(root)
         submenu.delegate?.menuNeedsUpdate?(submenu)
-        let choices = submenu.items.filter { $0.identifier != nil }
+        let choices = submenu.items.prefix { !$0.isSeparatorItem }
         XCTAssertEqual(choices.map(\.title), ["Wide", "Tall", "Wide"])
         XCTAssertEqual(choices.map(\.tag), [0, 1, 2])
 
         config.setLayoutKeys(["column"])
         submenu.delegate?.menuNeedsUpdate?(submenu)
-        XCTAssertEqual(submenu.items.compactMap { $0.identifier?.rawValue }, ["column"])
+        XCTAssertEqual(submenu.items.prefix { !$0.isSeparatorItem }.map { $0.identifier?.rawValue }, ["column"])
     }
 
     @MainActor func testConfiguredChoicesAreVisibleBeforeWindowManagementStarts() {
