@@ -63,6 +63,7 @@ extension UserDefaults: ConfigurationStorage {
 
 enum ConfigurationKey: String {
     case layouts = "layouts"
+    case displayLayoutDefaults = "display-layout-defaults"
     case commandMod = "mod"
     case commandKey = "key"
     case mod1 = "mod1"
@@ -513,6 +514,20 @@ class UserConfiguration: NSObject {
     func layoutKeys() -> [String] {
         let layoutKeys = storage.array(forKey: .layouts) as? [String]
         return layoutKeys ?? []
+    }
+
+    private var displayLayoutDefaults: [String: String] {
+        return storage.object(forKey: .displayLayoutDefaults) as? [String: String] ?? [:]
+    }
+
+    func defaultLayoutKey(forDisplay displayID: String) -> String? {
+        return displayLayoutDefaults[displayID]
+    }
+
+    func setDefaultLayoutKey(_ layoutKey: String, forDisplay displayID: String) {
+        var defaults = displayLayoutDefaults
+        defaults[displayID] = layoutKey
+        storage.set(defaults, forKey: .displayLayoutDefaults)
     }
 
     func setLayoutKeys(_ layoutKeys: [String]) {

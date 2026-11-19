@@ -30,6 +30,78 @@ private final class TestDelegate: ScreenManagerDelegate {
 
 class ScreenManagerTests: QuickSpec {
     override func spec() {
+        describe("per-display default layouts") {
+            let first = Space(id: 1, type: CGSSpaceTypeUser, uuid: "first")
+            let second = Space(id: 2, type: CGSSpaceTypeUser, uuid: "second")
+
+            it("preserves explicit choices on reconnect and starts new Spaces with that monitor's default") {
+                let config = UserConfiguration(storage: TestConfigurationStorage())
+                config.setLayoutKeys(["tall", "widescreen-tall", "floating"])
+                let screen = TestScreen(frame: .zero, id: "external")
+                let manager = ScreenManager(screen: screen, delegate: TestDelegate(), userConfiguration: config)
+                manager.updateSpace(to: first)
+                manager.selectLayout("widescreen-tall")
+                manager.useCurrentLayoutAsDisplayDefault()
+                manager.selectLayout("floating")
+
+                manager.updateScreen(to: TestScreen(frame: .zero, id: "external"))
+                manager.updateSpace(to: first)
+                expect(manager.currentLayout?.layoutKey).to(equal("floating"))
+                manager.updateSpace(to: second)
+                expect(manager.currentLayout?.layoutKey).to(equal("widescreen-tall"))
+            }
+
+            it("keeps independent defaults across manager and configuration recreation") {
+                let storage = TestConfigurationStorage()
+                let config = UserConfiguration(storage: storage)
+                config.setLayoutKeys(["tall", "wide", "fullscreen"])
+                for (display, key) in [("external", "wide"), ("built-in", "fullscreen")] {
+                    let screen = TestScreen(frame: .zero, id: display)
+                    let manager = ScreenManager(screen: screen, delegate: TestDelegate(), userConfiguration: config)
+                    manager.updateSpace(to: first)
+                    manager.selectLayout(key)
+                    manager.useCurrentLayoutAsDisplayDefault()
+                }
+
+                let reloaded = UserConfiguration(storage: storage)
+                reloaded.setLayoutKeys(["fullscreen", "tall", "wide"])
+                for (display, expected) in [("external", "wide"), ("built-in", "fullscreen"), ("new", "fullscreen")] {
+                    let screen = TestScreen(frame: .zero, id: display)
+                    let manager = ScreenManager(screen: screen, delegate: TestDelegate(), userConfiguration: reloaded)
+                    manager.updateSpace(to: second)
+                    expect(manager.currentLayout?.layoutKey).to(equal(expected))
+                }
+            }
+
+            it("falls back when a default is disabled and handles an empty layout list") {
+                let config = UserConfiguration(storage: TestConfigurationStorage())
+                let screen = TestScreen(frame: .zero, id: "external")
+                config.setDefaultLayoutKey("wide", forDisplay: "external")
+                config.setLayoutKeys(["floating", "tall"])
+                let manager = ScreenManager(screen: screen, delegate: TestDelegate(), userConfiguration: config)
+                manager.updateSpace(to: first)
+                expect(manager.currentLayout?.layoutKey).to(equal("floating"))
+                config.setLayoutKeys([])
+                manager.updateSpace(to: second)
+                expect(manager.currentLayout).to(beNil())
+                manager.useCurrentLayoutAsDisplayDefault()
+                expect(config.defaultLayoutKey(forDisplay: "external")).to(equal("wide"))
+            }
+
+            it("applies a changed default when revisiting a Space without an explicit choice") {
+                let config = UserConfiguration(storage: TestConfigurationStorage())
+                config.setLayoutKeys(["tall", "wide"])
+                let manager = ScreenManager(screen: TestScreen(), delegate: TestDelegate(), userConfiguration: config)
+                manager.updateSpace(to: first)
+                expect(manager.currentLayout?.layoutKey).to(equal("tall"))
+                manager.updateSpace(to: second)
+                manager.selectLayout("wide")
+                manager.useCurrentLayoutAsDisplayDefault()
+                manager.updateSpace(to: first)
+                expect(manager.currentLayout?.layoutKey).to(equal("wide"))
+            }
+        }
+
         describe("cycling layouts") {
             it("leaves the layout empty when both cycle commands are used") {
                 let configuration = UserConfiguration(storage: TestConfigurationStorage())

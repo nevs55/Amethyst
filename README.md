@@ -127,6 +127,10 @@ And defines the following commands, mostly a mapping to xmonad key combinations.
 Amethyst allows you to cycle among several different window layouts.
 Layouts can also be enabled/disabled to control whether they appear in the cycle sequence at all.
 
+To set a default for a monitor, open Amethyst’s menu on that display, choose a layout under **Layouts**, then choose **Use Current Layout as Default for This Display**.
+A Space with its own saved selection keeps that layout. Other Spaces use the display default, or the first enabled layout if the default is unavailable.
+The display default is saved across reconnects and relaunches.
+
 #### Tall
 
 The default layout. This gives you one "main pane" on the left, and one other pane on the right. By default, one window is placed in the main pane (extending the full height of the screen), and all remaining windows are placed in the other pane. If either pane has more than one window, that pane will be evenly split into rows, to show them all. You can use the keyboard shortcuts above to control which window(s), and how many, are in the main pane, as well as the horizontal size of the main pane vs. the other pane.
