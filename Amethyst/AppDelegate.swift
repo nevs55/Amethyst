@@ -23,10 +23,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     fileprivate var windowManager: WindowManager<SIApplication>?
     private var hotKeyManager: HotKeyManager<SIApplication>?
     private var permissionTimer: Timer?
-    private var defaultsObserver: NSObjectProtocol?
+    private let disposeBag = DisposeBag()
     private let permissionMenuItem = NSMenuItem(title: "Waiting for window-control permission", action: nil, keyEquivalent: "")
 
-    fileprivate var statusItem: NSStatusItem?
+    private(set) var statusItem: NSStatusItem?
     private var layoutMenuScreen: NSScreen?
     @IBOutlet var statusItemMenu: NSMenu?
     @IBOutlet var versionMenuItem: NSMenuItem?
@@ -104,10 +104,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemMenu?.insertItem(permissionMenuItem, at: 1)
         statusItem?.highlightMode = true
 
-        updateStatusItemVisibility()
-        defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
-            self?.updateStatusItemVisibility()
-        }
+        UserDefaults.standard.rx.observe(Bool.self, ConfigurationKey.hideMenuBarIcon.rawValue)
+            .distinctUntilChanged { $0 == $1 }
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { [weak self] _ in
+                self?.statusItem?.isVisible = !UserConfiguration.shared.hideMenuBarIcon()
+            })
+            .disposed(by: disposeBag)
 
         versionMenuItem?.title = "Version \(shortVersion) (\(version))"
         toggleGlobalTilingMenuItem?.title = "Disable"
@@ -119,15 +122,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         layoutsMenuItem?.submenu?.delegate = self
         statusItemMenu?.delegate = self
-    }
-
-    deinit {
-        if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
-    }
-
-    private func updateStatusItemVisibility() {
-        let visible = !UserConfiguration.shared.hideMenuBarIcon()
-        if statusItem?.isVisible != visible { statusItem?.isVisible = visible }
     }
 
     private static func importPreviewPreferences() {

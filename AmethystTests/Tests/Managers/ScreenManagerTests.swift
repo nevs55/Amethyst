@@ -375,6 +375,19 @@ class ScreenManagerTests: QuickSpec {
 }
 
 final class StatusLayoutsMenuTests: XCTestCase {
+    @MainActor func testShowMenuBarIconTakesEffectInTheRunningApp() throws {
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let item = try XCTUnwrap(app.statusItem)
+        let key = ConfigurationKey.hideMenuBarIcon.rawValue
+        let defaults = UserDefaults.standard
+        let original = defaults.object(forKey: key)
+        defer { defaults.set(original, forKey: key) }
+        defaults.set(true, forKey: key)
+        XCTAssertFalse(item.isVisible)
+        defaults.set(false, forKey: key)
+        XCTAssertTrue(item.isVisible)
+    }
+
     @MainActor func testNibSubmenuRefreshesFromPreferences() throws {
         let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
         let root = try XCTUnwrap(app.statusItemMenu)
