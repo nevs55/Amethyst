@@ -16,7 +16,8 @@ jobs:
       - name: Run macOS unit tests
         run: |
           set -o pipefail
-          xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst test | xcbeautify
+          xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -derivedDataPath "$RUNNER_TEMP/build" \
+            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 90 test | xcbeautify
       - name: Build universal Release app
         run: |
           set -o pipefail
@@ -43,7 +44,10 @@ jobs:
           trap 'hdiutil detach "$mount"' EXIT
           app="$mount/Amethyst.app"
           codesign --verify --deep --strict --verbose "$app"
-          lipo "$app/Contents/MacOS/Amethyst" -verify_arch arm64 x86_64
+          archs=$(xcrun lipo -archs "$app/Contents/MacOS/Amethyst")
+          for arch in arm64 x86_64; do
+            [[ " $archs " == *" $arch "* ]] || { echo "Missing $arch in $archs"; exit 1; }
+          done
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = 133
           "$app/Contents/MacOS/Amethyst" debug windows --redact-window-titles > "$RUNNER_TEMP/windows-report.txt"
           grep -q '^Accessibility access for this diagnostic:' "$RUNNER_TEMP/windows-report.txt"
