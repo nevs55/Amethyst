@@ -35,7 +35,7 @@ jobs:
           trap 'hdiutil detach "$mount"' EXIT
           app="$mount/Amethyst.app"
           codesign --verify --deep --strict --verbose "$app"
-          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/Amethyst"
+          lipo "$app/Contents/MacOS/Amethyst" -verify_arch arm64 x86_64
           "$app/Contents/MacOS/Amethyst" --help
           shasum -a 256 "$image"
       - uses: actions/upload-artifact@v4
