@@ -19,10 +19,11 @@ final class TestScreen: ScreenType {
         return descriptions
     }
 
-    private let id: String = UUID().uuidString
+    private let id: String
     private let internalFrame: CGRect
 
-    init(frame: CGRect) {
+    init(frame: CGRect, id: String = UUID().uuidString) {
+        self.id = id
         internalFrame = frame
     }
 

@@ -169,8 +169,15 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
         let selection = selectionsBySpaceUUID[space.uuid]
         let matches = layouts.indices.filter { layouts[$0].layoutKey == selection?.key }
         let occurrence = selection?.occurrence ?? 0
+        let defaultKey = screen?.screenID().flatMap { userConfiguration.defaultLayoutKey(forDisplay: $0) }
+        let defaultIndex = layouts.firstIndex { $0.layoutKey == defaultKey } ?? 0
         currentLayoutIndex = 0
-        setCurrentLayoutIndex(matches.indices.contains(occurrence) ? matches[occurrence] : 0, changingSpace: true)
+        setCurrentLayoutIndex(matches.indices.contains(occurrence) ? matches[occurrence] : defaultIndex, changingSpace: true)
+    }
+
+    func useCurrentLayoutAsDisplayDefault() {
+        guard let displayID = screen?.screenID(), let key = currentLayout?.layoutKey else { return }
+        userConfiguration.setDefaultLayoutKey(key, forDisplay: displayID)
     }
 
     private func layouts(for space: Space) -> [Layout<Window>] {
@@ -350,7 +357,7 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
         }
 
         currentLayoutIndex = index
-        if let space {
+        if !changingSpace, let space {
             let key = layouts[index].layoutKey
             let occurrence = layouts[..<index].filter { $0.layoutKey == key }.count
             selectionsBySpaceUUID[space.uuid] = Selection(key: key, occurrence: occurrence)

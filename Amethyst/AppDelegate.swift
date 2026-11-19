@@ -188,18 +188,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Clear existing items
         submenu.removeAllItems()
 
-        // Get screen manager: try focused screen first, then screen under mouse cursor
+        // Keep menu actions on the display where the status menu was opened.
         let screenManager: ScreenManager<WindowManager<SIApplication>>? = {
-            if let focused = windowManager?.focusedScreenManager() {
-                return focused
-            }
-            // Fallback to screen containing mouse cursor (useful when clicking menu bar)
             let mouseLocation = NSEvent.mouseLocation
             if let nsScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
                 let amScreen = AMScreen(screen: nsScreen)
-                return windowManager?.screenManager(for: amScreen)
+                if let manager = windowManager?.screenManager(for: amScreen) {
+                    return manager
+                }
             }
-            return nil
+            return windowManager?.focusedScreenManager()
         }()
 
         guard let screenManager = screenManager else {
@@ -224,17 +222,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for layoutInfo in layouts {
             let menuItem = NSMenuItem(title: layoutInfo.name, action: #selector(selectLayout(_:)), keyEquivalent: "")
             menuItem.target = self
-            menuItem.representedObject = layoutInfo.key
+            menuItem.identifier = NSUserInterfaceItemIdentifier(layoutInfo.key)
+            menuItem.representedObject = screenManager
             menuItem.state = layoutInfo.isSelected ? .on : .off
 
             submenu.addItem(menuItem)
         }
+
+        submenu.addItem(.separator())
+        let defaultItem = NSMenuItem(
+            title: "Use Current Layout as Default for This Display",
+            action: #selector(useCurrentLayoutAsDisplayDefault(_:)),
+            keyEquivalent: ""
+        )
+        defaultItem.target = self
+        defaultItem.representedObject = screenManager
+        submenu.addItem(defaultItem)
+    }
+
+    @objc private func useCurrentLayoutAsDisplayDefault(_ sender: NSMenuItem) {
+        let manager = sender.representedObject as? ScreenManager<WindowManager<SIApplication>>
+        manager?.useCurrentLayoutAsDisplayDefault()
     }
 
     @IBAction func selectLayout(_ sender: NSMenuItem) {
-        guard let layoutKey = sender.representedObject as? String,
-              let windowManager = windowManager,
-              let screenManager = windowManager.focusedScreenManager() else {
+        guard let layoutKey = sender.identifier?.rawValue,
+              let screenManager = sender.representedObject as? ScreenManager<WindowManager<SIApplication>> else {
             return
         }
 
