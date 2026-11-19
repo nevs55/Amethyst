@@ -20,11 +20,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @IBOutlet var preferencesWindowController: PreferencesWindowController?
 
-    fileprivate var windowManager: WindowManager<SIApplication>?
+    private(set) var windowManager: WindowManager<SIApplication>?
     private var hotKeyManager: HotKeyManager<SIApplication>?
     private var permissionTimer: Timer?
     private let disposeBag = DisposeBag()
-    private let permissionMenuItem = NSMenuItem(title: "Waiting for window-control permission", action: nil, keyEquivalent: "")
+    private let permissionMenuItem = NSMenuItem(title: "Check Window Access…", action: #selector(checkWindowAccess(_:)), keyEquivalent: "")
 
     private(set) var statusItem: NSStatusItem?
     private var layoutMenuScreen: NSScreen?
@@ -100,7 +100,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem?.image = statusItemImage
         statusItem?.menu = statusItemMenu
-        permissionMenuItem.isHidden = true
+        permissionMenuItem.target = self
         statusItemMenu?.insertItem(permissionMenuItem, at: 1)
         statusItem?.highlightMode = true
 
@@ -221,11 +221,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        submenu.removeAllItems()
         let screen = layoutMenuScreen ?? statusItem?.button?.window?.screen ?? NSScreen.main
         let manager = screen.flatMap { windowManager?.screenManagerForLayoutMenu(on: AMScreen(screen: $0)) }
+        updateLayoutsMenu(submenu, for: manager)
+    }
+
+    func updateLayoutsMenu(_ submenu: NSMenu, for manager: ScreenManager<WindowManager<SIApplication>>?) {
+        submenu.removeAllItems()
         let config = UserConfiguration.shared
-        let ready = config.hasAccessibilityPermissions && manager?.space != nil
+        let ready = manager?.space != nil
         let layouts: [LayoutMenuItemInfo]
         if ready, let manager {
             layouts = manager.layoutsInfo
@@ -257,8 +261,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         submenu.addItem(.separator())
         guard ready else {
-            let reason = config.hasAccessibilityPermissions ? "Waiting for the current display and Space" : "Waiting for window-control permission"
-            submenu.addItem(withTitle: reason, action: nil, keyEquivalent: "").isEnabled = false
+            submenu.addItem(withTitle: "Waiting for the current display and Space", action: nil, keyEquivalent: "").isEnabled = false
             return
         }
         let defaultItem = NSMenuItem(
@@ -284,6 +287,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         screenManager.selectLayout(at: sender.tag, matching: layoutKey)
     }
+
+    deinit {
+        permissionTimer?.invalidate()
+    }
+
+    @objc private func checkWindowAccess(_ sender: NSMenuItem) {
+        let alert = NSAlert()
+        alert.messageText = "Window Access"
+        if let app = sender.representedObject as? NSRunningApplication, !app.isTerminated {
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(element, 1)
+            var count = 0
+            let result = AXUIElementGetAttributeValueCount(element, kAXWindowsAttribute as CFString, &count)
+            let name = app.localizedName ?? "Selected app"
+            let access: String
+            switch result {
+            case .success: access = "macOS reported \(count) windows for \(name)."
+            case .apiDisabled: access = "macOS denied window access to \(name) (AX \(result.rawValue))."
+            default: access = "The window list for \(name) could not be read (AX \(result.rawValue))."
+            }
+            let tracked = windowManager?.trackedWindowCount(for: app.processIdentifier) ?? 0
+            let trust = AXIsProcessTrusted() ? "granted" : "not granted"
+            alert.informativeText = "\(access)\nAmethyst is tracking \(tracked) windows for this app.\nProcess-wide access is \(trust)."
+        } else {
+            alert.informativeText = "Click a window in the app you want to check, then open this menu again."
+        }
+        alert.runModal()
+    }
 }
 
 extension AppDelegate: NSWindowDelegate {
@@ -295,6 +326,10 @@ extension AppDelegate: NSWindowDelegate {
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         if menu == statusItemMenu {
+            let frontApp = NSWorkspace.shared.frontmostApplication
+            let target = frontApp?.isManageable == .manageable ? frontApp : nil
+            permissionMenuItem.representedObject = target
+            permissionMenuItem.title = target?.localizedName.map { "Check Window Access for \($0)…" } ?? "Check Window Access…"
             let mouse = NSEvent.mouseLocation
             layoutMenuScreen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? statusItem?.button?.window?.screen
             UserConfiguration.shared.refreshAccessibilityPermissions()
@@ -324,7 +359,12 @@ extension AppDelegate: UserConfigurationDelegate {
     }
 
     func configurationAccessibilityPermissionsDidChange(_ userConfiguration: UserConfiguration) {
-        permissionMenuItem.isHidden = userConfiguration.hasAccessibilityPermissions
+        // macOS can grant access to individual applications. Let AX decide for each target.
+        if windowManager == nil {
+            startWindowManagement()
+        } else if userConfiguration.hasAccessibilityPermissions {
+            windowManager?.reevaluateWindows()
+        }
         guard userConfiguration.hasAccessibilityPermissions else {
             if permissionTimer == nil {
                 let timer = Timer(timeInterval: 1, repeats: true) { _ in
@@ -337,10 +377,5 @@ extension AppDelegate: UserConfigurationDelegate {
         }
         permissionTimer?.invalidate()
         permissionTimer = nil
-        if let windowManager {
-            windowManager.reevaluateWindows()
-        } else {
-            startWindowManagement()
-        }
     }
 }

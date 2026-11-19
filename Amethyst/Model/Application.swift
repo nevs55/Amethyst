@@ -182,7 +182,7 @@ extension SIApplication: ApplicationType {
 
     func windows() -> [Window] {
         let axWindows: [SIWindow] = self.windows()
-        return axWindows.map { Window(axElement: $0.axElementRef) }
+        return axWindows.compactMap { Window(element: $0) }
     }
 
     func pid() -> pid_t {

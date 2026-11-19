@@ -81,6 +81,17 @@ class UserConfigurationTests: QuickSpec {
         }
 
         describe("constructing commands") {
+            it("dispatches the registered command when process-wide trust is unavailable") {
+                let config = UserConfiguration(storage: TestConfigurationStorage())
+                config.refreshAccessibilityPermissions { false }
+                let registrar = TestHotKeyRegistrar()
+                waitUntil { done in
+                    config.constructCommand(for: registrar, commandKey: "test") {
+                        DispatchQueue.main.async { done() }
+                    }
+                    registrar.handler?()
+                }
+            }
             context("overrides") {
                 it("when user configuration exists") {
                     var configuration = UserConfiguration(storage: TestConfigurationStorage())

@@ -127,4 +127,4 @@ else
 fi
 echo "Installed Amethyst build $(build_number "$installed"). Opening the app..."
 /usr/bin/open "$installed"
-echo "If macOS asks, allow window control for Amethyst Preview. Tiling starts when access is granted."
+echo "To check access, click a window and choose Check Window Access from the Amethyst menu."

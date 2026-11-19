@@ -184,14 +184,12 @@ class ScreenManagerTests: QuickSpec {
         }
 
         describe("window tracking") {
-            it("starts observing after access is granted to the running app") {
+            it("starts observing even when the process-wide permission check returns false") {
                 let app = PermissionTestAppDelegate()
                 let config = UserConfiguration(storage: TestConfigurationStorage())
                 config.delegate = app
                 config.refreshAccessibilityPermissions { false }
-                expect(app.starts).to(equal(0))
-                config.refreshAccessibilityPermissions { true }
-                config.refreshAccessibilityPermissions { true }
+                config.refreshAccessibilityPermissions { false }
                 expect(app.starts).to(equal(1))
             }
 
@@ -375,6 +373,32 @@ class ScreenManagerTests: QuickSpec {
 }
 
 final class StatusLayoutsMenuTests: XCTestCase {
+    @MainActor func testLayoutsCanBeSelectedWithoutProcessWideTrust() throws {
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let windowManager = try XCTUnwrap(app.windowManager)
+        let screen = try XCTUnwrap(NSScreen.main)
+        let config = UserConfiguration.shared
+        let originalKeys = config.layoutKeys()
+        let originalTrust = config.hasAccessibilityPermissions
+        defer {
+            config.setLayoutKeys(originalKeys)
+            config.refreshAccessibilityPermissions { originalTrust }
+        }
+        config.refreshAccessibilityPermissions { false }
+        config.setLayoutKeys(["tall", "wide"])
+        let manager = ScreenManager(screen: AMScreen(screen: screen), delegate: windowManager, userConfiguration: config)
+        manager.updateSpace(to: Space(id: 1, type: CGSSpaceTypeUser, uuid: "menu-test"))
+        let menu = NSMenu()
+        app.updateLayoutsMenu(menu, for: manager)
+        let wide = try XCTUnwrap(menu.item(withTitle: "Wide"))
+        XCTAssertTrue(wide.isEnabled)
+        XCTAssertNotNil(wide.action)
+        app.selectLayout(wide)
+        XCTAssertEqual(manager.currentLayout?.layoutKey, "wide")
+        config.refreshAccessibilityPermissions { true }
+        XCTAssertTrue(windowManager === app.windowManager)
+    }
+
     @MainActor func testShowMenuBarIconTakesEffectInTheRunningApp() throws {
         let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
         let item = try XCTUnwrap(app.statusItem)

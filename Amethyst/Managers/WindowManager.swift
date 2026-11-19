@@ -60,6 +60,7 @@ final class WindowManager<Application: ApplicationType>: NSObject, Codable {
     let focusTransitionCoordinator: FocusTransitionCoordinator<WindowManager<Application>>
 
     private var applications: [pid_t: AnyApplication<Application>] = [:]
+    private var deniedApplicationPIDs = Set<pid_t>()
     private var applicationObservations: [pid_t: UndeterminedApplication] = [:]
     private var screens: Screens
     private let windows = TrackedWindows<Window>()
@@ -99,6 +100,7 @@ final class WindowManager<Application: ApplicationType>: NSObject, Codable {
 
         addWorkspaceNotificationObserver(NSWorkspace.didHideApplicationNotification, selector: #selector(applicationDidHide(_:)))
         addWorkspaceNotificationObserver(NSWorkspace.didUnhideApplicationNotification, selector: #selector(applicationDidUnhide(_:)))
+        addWorkspaceNotificationObserver(NSWorkspace.didActivateApplicationNotification, selector: #selector(retryWindowAccess(_:)))
         addWorkspaceNotificationObserver(NSWorkspace.activeSpaceDidChangeNotification, selector: #selector(activeSpaceDidChange(_:)))
 
         NotificationCenter.default.addObserver(
@@ -217,6 +219,12 @@ final class WindowManager<Application: ApplicationType>: NSObject, Codable {
     @objc func screenParametersDidChange(_ notification: Notification) {
         screens.updateScreens(windowManager: self)
     }
+
+    @objc private func retryWindowAccess(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              deniedApplicationPIDs.remove(app.processIdentifier) != nil else { return }
+        add(runningApplication: app)
+    }
 }
 
 extension WindowManager: ApplicationEventHandlerDelegate {
@@ -243,6 +251,7 @@ extension WindowManager: ApplicationEventHandlerDelegate {
     }
 
     func remove(applicationWithPID pid: pid_t) {
+        deniedApplicationPIDs.remove(pid)
         guard let application = applicationWithPID(pid) else {
             log.warning("process terminated with no application: \(pid)")
             return
@@ -291,7 +300,13 @@ extension WindowManager {
         ApplicationObservation(application: application, delegate: self)
             .addObservers()
             .subscribe(
+                onError: { [weak self] error in
+                    if case ApplicationObservation<WindowManager>.Error.observationFailed(AXError.apiDisabled.rawValue) = error {
+                        self?.deniedApplicationPIDs.insert(application.pid())
+                    }
+                },
                 onCompleted: { [weak self] in
+                    self?.deniedApplicationPIDs.remove(application.pid())
                     self?.applications[application.pid()] = application
 
                     for window in application.windows() {
@@ -367,6 +382,10 @@ extension WindowManager {
 
     func markAllScreensForReflow() {
         screens.markAllScreensForReflow()
+    }
+
+    func trackedWindowCount(for pid: pid_t) -> Int {
+        windows.windows(forApplicationWithPID: pid).count
     }
 
     func displayCurrentLayout() {

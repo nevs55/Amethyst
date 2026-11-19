@@ -483,16 +483,7 @@ class UserConfiguration: NSObject {
             }
         }
 
-        let injectedHandler: () -> Void = { [weak self] in
-            guard let `self` = self else {
-                return
-            }
-
-            self.refreshAccessibilityPermissions(using: self.confirmAccessibilityPermissions)
-            guard self.hasAccessibilityPermissions else {
-                return
-            }
-
+        let injectedHandler: () -> Void = {
             DispatchQueue.global(qos: .userInitiated).async {
                 handler()
             }

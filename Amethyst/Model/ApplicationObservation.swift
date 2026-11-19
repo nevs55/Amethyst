@@ -200,6 +200,9 @@ struct ApplicationObservation<Delegate: ApplicationObservationDelegate> {
     func addObservers() -> Observable<Void> {
         return _addObservers(notifications: Notification.applicationNotifications).retry { errorTrigger in
             errorTrigger.enumerated().flatMap { count, error -> Observable<Int> in
+                if case Error.observationFailed(AXError.apiDisabled.rawValue) = error {
+                    return .error(error)
+                }
                 guard count < 6 else {
                     return .error(error)
                 }
