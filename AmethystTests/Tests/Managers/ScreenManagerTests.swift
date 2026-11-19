@@ -374,6 +374,64 @@ class ScreenManagerTests: QuickSpec {
     }
 }
 
+final class StatusLayoutsMenuTests: XCTestCase {
+    @MainActor func testNibSubmenuRefreshesFromPreferences() throws {
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let root = try XCTUnwrap(app.statusItemMenu)
+        let submenu = try XCTUnwrap(app.layoutsMenuItem?.submenu)
+        XCTAssertTrue(root.delegate === app)
+        XCTAssertTrue(submenu.delegate === app)
+
+        let config = UserConfiguration.shared
+        let original = config.layoutKeys()
+        defer { config.setLayoutKeys(original) }
+        config.setLayoutKeys(["wide", "tall", "wide"])
+        root.delegate?.menuNeedsUpdate?(root)
+        submenu.delegate?.menuNeedsUpdate?(submenu)
+        let choices = submenu.items.filter { $0.identifier != nil }
+        XCTAssertEqual(choices.map(\.title), ["Wide", "Tall", "Wide"])
+        XCTAssertEqual(choices.map(\.tag), [0, 1, 2])
+
+        config.setLayoutKeys(["column"])
+        submenu.delegate?.menuNeedsUpdate?(submenu)
+        XCTAssertEqual(submenu.items.compactMap { $0.identifier?.rawValue }, ["column"])
+    }
+
+    @MainActor func testConfiguredChoicesAreVisibleBeforeWindowManagementStarts() {
+        let app = AppDelegate()
+        let item = NSMenuItem(title: "Layouts", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        item.submenu = submenu
+        app.layoutsMenuItem = item
+        let config = UserConfiguration.shared
+        let original = config.layoutKeys()
+        defer { config.setLayoutKeys(original) }
+        config.setLayoutKeys(["tall", "wide"])
+        app.menuNeedsUpdate(submenu)
+        let choices = submenu.items.filter { $0.identifier != nil }
+        XCTAssertEqual(choices.map(\.title), ["Tall", "Wide"])
+        XCTAssertTrue(choices.allSatisfy { !$0.isEnabled && $0.action == nil })
+        XCTAssertTrue(submenu.items.last?.title.hasPrefix("Waiting for") == true)
+    }
+
+    @MainActor func testMenuSelectsTheClickedOccurrenceAfterPreferencesChange() {
+        let config = UserConfiguration(storage: TestConfigurationStorage())
+        config.setLayoutKeys(["tall", "wide"])
+        let manager = ScreenManager(screen: TestScreen(frame: .zero), delegate: TestDelegate(), userConfiguration: config)
+        manager.updateSpace(to: Space(id: 1, type: CGSSpaceTypeUser, uuid: "first"))
+        let tall = manager.currentLayout
+        config.setLayoutKeys(["wide", "tall", "wide"])
+        manager.reloadLayouts()
+        manager.selectLayout(at: 1, matching: "tall")
+        XCTAssertTrue(manager.currentLayout === tall)
+        manager.selectLayout(at: 2, matching: "wide")
+        XCTAssertEqual(manager.layoutsInfo.map(\.isSelected), [false, false, true])
+        manager.selectLayout(at: 2, matching: "wide")
+        manager.selectLayout(at: 0, matching: "tall")
+        XCTAssertEqual(manager.layoutsInfo.map(\.isSelected), [false, false, true])
+    }
+}
+
 final class TallWindowCloseTests: XCTestCase {
     @MainActor func testClosingTopRightResizesRemainingWindowsBeforeDestroyNotification() async throws {
         let screen = TestScreen(frame: CGRect(x: 0, y: 0, width: 3840, height: 1600), id: "external")

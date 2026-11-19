@@ -20,6 +20,11 @@ extension WindowManager {
 
         init() {}
 
+        func reloadLayouts() {
+            screenManagersCache.values.forEach { $0.reloadLayouts() }
+            markAllScreensForReflow()
+        }
+
         func updateSpaces() {
             guard let screensInfo = CGScreensInfo<Window>() else {
                 return

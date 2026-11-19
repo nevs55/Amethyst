@@ -146,6 +146,7 @@ enum CommandKey: String {
 }
 
 protocol UserConfigurationDelegate: AnyObject {
+    func configurationLayoutsDidChange(_ userConfiguration: UserConfiguration)
     func configurationGlobalTilingDidChange(_ userConfiguration: UserConfiguration)
     func configurationAccessibilityPermissionsDidChange(_ userConfiguration: UserConfiguration)
 }
@@ -531,6 +532,7 @@ class UserConfiguration: NSObject {
 
     func setLayoutKeys(_ layoutKeys: [String]) {
         storage.set(layoutKeys as Any?, forKey: .layouts)
+        delegate?.configurationLayoutsDidChange(self)
     }
 
     func runningApplication(_ runningApplication: BundleIdentifiable, byDefaultFloatsForTitle title: String?) -> Reliable<DefaultFloat> {

@@ -117,8 +117,7 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
         - userConfiguration: User configuration defining the list of layouts.
      */
     static func decodedLayouts(from encodedLayouts: [[String: Data]], userConfiguration: UserConfiguration) throws -> [Layout<Window>] {
-        let layouts: [Layout<Window>] = LayoutType.layoutsWithConfiguration(userConfiguration)
-        var decodedLayouts: [Layout<Window>] = encodedLayouts.compactMap { layout in
+        let decodedLayouts: [Layout<Window>] = encodedLayouts.compactMap { layout in
             guard let keyData = layout["key"], let key = String(data: keyData, encoding: .utf8) else {
                 return nil
             }
@@ -136,13 +135,27 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
             return nil
         }
 
-        // Yes this is quadratic, but if your layout list is long enough for that to be significant what are you even doing?
-        return layouts.map { layout -> Layout<Window> in
-            guard let decodedLayoutIndex = decodedLayouts.firstIndex(where: { $0.layoutKey == layout.layoutKey }) else {
-                return layout
-            }
+        return configuredLayouts(reusing: decodedLayouts, configuration: userConfiguration)
+    }
 
-            return decodedLayouts.remove(at: decodedLayoutIndex)
+    private static func configuredLayouts(reusing existing: [Layout<Window>], configuration: UserConfiguration) -> [Layout<Window>] {
+        var remaining = existing
+        let configured: [Layout<Window>] = LayoutType.layoutsWithConfiguration(configuration)
+        return configured.map { layout in
+            if let index = remaining.firstIndex(where: { $0.layoutKey == layout.layoutKey }) {
+                return remaining.remove(at: index)
+            }
+            return layout
+        }
+    }
+
+    func reloadLayouts() {
+        layoutsBySpaceUUID = layoutsBySpaceUUID.mapValues { Self.configuredLayouts(reusing: $0, configuration: userConfiguration) }
+        if let space {
+            updateSpace(to: space)
+        } else {
+            layouts = Self.configuredLayouts(reusing: layouts, configuration: userConfiguration)
+            currentLayoutIndex = 0
         }
     }
 
@@ -349,6 +362,13 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
         setCurrentLayoutIndex(layoutIndex)
         setNeedsReflow()
         previousLayoutKey = currentLayoutKey
+    }
+
+    func selectLayout(at index: Int, matching key: String) {
+        guard layouts.indices.contains(index), layouts[index].layoutKey == key else { return }
+        if index != currentLayoutIndex { previousLayoutKey = currentLayout?.layoutKey }
+        setCurrentLayoutIndex(index)
+        setNeedsReflow()
     }
 
     private func setCurrentLayoutIndex(_ index: Int, changingSpace: Bool = false) {

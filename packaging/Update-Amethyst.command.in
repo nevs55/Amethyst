@@ -1,8 +1,8 @@
 #!/bin/bash
 set -eu
 cd "$(dirname "$0")"
-image="Amethyst-preview-133.dmg"
-echo "Checking the Amethyst 0.25.0 (133) disk image..."
+image="Amethyst-preview-__BUILD__.dmg"
+echo "Checking the Amethyst 0.25.0 (__BUILD__) disk image..."
 printf '%s  %s\n' '__DMG_SHA256__' "$image" | /usr/bin/shasum -a 256 -c -
 mountpoint=$(/usr/bin/mktemp -d)
 mounted=false
@@ -31,11 +31,11 @@ build_number() {
     /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$1/Contents/Info.plist"
 }
 verify_preview() {
-    [[ "$(build_number "$1")" == 133 ]] &&
+    [[ "$(build_number "$1")" == __BUILD__ ]] &&
         /usr/bin/codesign --verify --deep --strict "$1" &&
         /usr/bin/cmp -s "$app/Contents/MacOS/Amethyst" "$1/Contents/MacOS/Amethyst"
 }
-verify_preview "$app" || { echo "The mounted app is not the expected build 133."; exit 1; }
+verify_preview "$app" || { echo "The mounted app is not the expected build __BUILD__."; exit 1; }
 if [[ -L "$installed" ]]; then
     echo "$installed is a symbolic link. Install using the tool that manages it."
     exit 1

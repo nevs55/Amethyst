@@ -23,9 +23,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     fileprivate var windowManager: WindowManager<SIApplication>?
     private var hotKeyManager: HotKeyManager<SIApplication>?
     private var permissionTimer: Timer?
+    private var defaultsObserver: NSObjectProtocol?
     private let permissionMenuItem = NSMenuItem(title: "Waiting for window-control permission", action: nil, keyEquivalent: "")
 
     fileprivate var statusItem: NSStatusItem?
+    private var layoutMenuScreen: NSScreen?
     @IBOutlet var statusItemMenu: NSMenu?
     @IBOutlet var versionMenuItem: NSMenuItem?
     @IBOutlet var startAtLoginMenuItem: NSMenuItem?
@@ -68,6 +70,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         preferencesWindowController?.window?.level = .floating
         configurationAccessibilityPermissionsDidChange(UserConfiguration.shared)
+        populateLayoutsMenu()
     }
 
     func startWindowManagement() {
@@ -101,16 +104,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemMenu?.insertItem(permissionMenuItem, at: 1)
         statusItem?.highlightMode = true
 
-        let hideMenuBarIcon: Bool = UserConfiguration.shared.hideMenuBarIcon()
-        statusItem?.isVisible = !hideMenuBarIcon
+        updateStatusItemVisibility()
+        defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
+            self?.updateStatusItemVisibility()
+        }
 
         versionMenuItem?.title = "Version \(shortVersion) (\(version))"
         toggleGlobalTilingMenuItem?.title = "Disable"
 
         startAtLoginMenuItem?.state = (LoginServiceKit.isExistLoginItems(at: Bundle.main.bundlePath) ? .on : .off)
 
-        // Set up status item menu delegate to refresh layouts when main menu is opened
+        if layoutsMenuItem?.submenu == nil {
+            layoutsMenuItem?.submenu = NSMenu(title: "Layouts")
+        }
+        layoutsMenuItem?.submenu?.delegate = self
         statusItemMenu?.delegate = self
+    }
+
+    deinit {
+        if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
+    }
+
+    private func updateStatusItemVisibility() {
+        let visible = !UserConfiguration.shared.hideMenuBarIcon()
+        if statusItem?.isVisible != visible { statusItem?.isVisible = visible }
     }
 
     private static func importPreviewPreferences() {
@@ -210,32 +227,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Clear existing items
         submenu.removeAllItems()
-
-        // Keep menu actions on the display where the status menu was opened.
-        let screenManager: ScreenManager<WindowManager<SIApplication>>? = {
-            let mouseLocation = NSEvent.mouseLocation
-            if let nsScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
-                let amScreen = AMScreen(screen: nsScreen)
-                if let manager = windowManager?.screenManager(for: amScreen) {
-                    return manager
-                }
+        let screen = layoutMenuScreen ?? statusItem?.button?.window?.screen ?? NSScreen.main
+        let manager = screen.flatMap { windowManager?.screenManagerForLayoutMenu(on: AMScreen(screen: $0)) }
+        let config = UserConfiguration.shared
+        let ready = config.hasAccessibilityPermissions && manager?.space != nil
+        let layouts: [LayoutMenuItemInfo]
+        if ready, let manager {
+            layouts = manager.layoutsInfo
+        } else {
+            layouts = config.layoutKeys().compactMap { key in
+                guard let name = LayoutType<AXWindow>.layoutNameForKey(key) else { return nil }
+                return LayoutMenuItemInfo(key: key, name: name, isSelected: false)
             }
-            return windowManager?.focusedScreenManager()
-        }()
-
-        guard let screenManager = screenManager else {
-            let errorItem = NSMenuItem(title: "Unable to determine current screen", action: nil, keyEquivalent: "")
-            errorItem.isEnabled = false
-            submenu.addItem(errorItem)
-            return
         }
 
-        // Get layouts from the screen manager (not from global config)
-        let layouts = screenManager.layoutsInfo
-
-        // Check if no layouts are available and return early
         if layouts.isEmpty {
             let noLayoutsItem = NSMenuItem(title: "No layouts enabled", action: nil, keyEquivalent: "")
             noLayoutsItem.isEnabled = false
@@ -243,25 +249,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Add menu items for each layout in the screen manager
-        for layoutInfo in layouts {
-            let menuItem = NSMenuItem(title: layoutInfo.name, action: #selector(selectLayout(_:)), keyEquivalent: "")
+        for (index, layoutInfo) in layouts.enumerated() {
+            let menuItem = NSMenuItem(title: layoutInfo.name, action: ready ? #selector(selectLayout(_:)) : nil, keyEquivalent: "")
             menuItem.target = self
+            menuItem.tag = index
             menuItem.identifier = NSUserInterfaceItemIdentifier(layoutInfo.key)
-            menuItem.representedObject = screenManager
+            menuItem.representedObject = manager
+            menuItem.isEnabled = ready
             menuItem.state = layoutInfo.isSelected ? .on : .off
 
             submenu.addItem(menuItem)
         }
 
         submenu.addItem(.separator())
+        guard ready else {
+            let reason = config.hasAccessibilityPermissions ? "Waiting for the current display and Space" : "Waiting for window-control permission"
+            submenu.addItem(withTitle: reason, action: nil, keyEquivalent: "").isEnabled = false
+            return
+        }
         let defaultItem = NSMenuItem(
             title: "Use Current Layout as Default for This Display",
             action: #selector(useCurrentLayoutAsDisplayDefault(_:)),
             keyEquivalent: ""
         )
         defaultItem.target = self
-        defaultItem.representedObject = screenManager
+        defaultItem.representedObject = manager
         submenu.addItem(defaultItem)
     }
 
@@ -276,8 +288,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        screenManager.selectLayout(layoutKey)
-        // Menu will be refreshed automatically when next opened via NSMenuDelegate
+        screenManager.selectLayout(at: sender.tag, matching: layoutKey)
     }
 }
 
@@ -288,16 +299,23 @@ extension AppDelegate: NSWindowDelegate {
 }
 
 extension AppDelegate: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
-        // Refresh layouts menu when main status item menu is about to open
+    func menuNeedsUpdate(_ menu: NSMenu) {
         if menu == statusItemMenu {
+            let mouse = NSEvent.mouseLocation
+            layoutMenuScreen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? statusItem?.button?.window?.screen
             UserConfiguration.shared.refreshAccessibilityPermissions()
+            populateLayoutsMenu()
+        } else if menu == layoutsMenuItem?.submenu {
             populateLayoutsMenu()
         }
     }
 }
 
 extension AppDelegate: UserConfigurationDelegate {
+    func configurationLayoutsDidChange(_ userConfiguration: UserConfiguration) {
+        windowManager?.reloadLayouts()
+    }
+
     func configurationGlobalTilingDidChange(_ userConfiguration: UserConfiguration) {
         var statusItemImage: NSImage?
         if UserConfiguration.shared.tilingEnabled == true {

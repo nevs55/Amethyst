@@ -263,6 +263,19 @@ extension WindowManager {
         return screens.focusedScreenManager()
     }
 
+    func screenManagerForLayoutMenu(on screen: Screen) -> ScreenManager<WindowManager<Application>>? {
+        if let manager = screenManager(for: screen) {
+            if manager.space == nil { screens.updateSpaces() }
+            return manager
+        }
+        screens.updateScreens(windowManager: self)
+        return screenManager(for: screen)
+    }
+
+    func reloadLayouts() {
+        screens.reloadLayouts()
+    }
+
     fileprivate func applicationWithPID(_ pid: pid_t) -> AnyApplication<Application>? {
         return applications[pid]
     }
@@ -958,7 +971,8 @@ extension WindowManager {
     }
 
     func screenManager(for screen: Screen) -> ScreenManager<WindowManager<Application>>? {
-        return screens.screenManagers.first { $0.screen?.screenID() == screen.screenID() }
+        guard let id = screen.screenID() else { return nil }
+        return screens.screenManagers.first { $0.screen?.screenID() == id }
     }
 
     func screenManagerIndex(for screen: Screen) -> Int? {
