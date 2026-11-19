@@ -5,6 +5,14 @@ import Quick
 
 class SIWindowAmethystTests: QuickSpec {
     override func spec() {
+        it("reports readable windows before and after an unreadable Accessibility element") {
+            let results: [String?] = ["first window", nil, "last window"]
+            let report = Windows.windowReport(for: results) { $0 }
+            expect(report.components(separatedBy: "\n\n")).to(equal([
+                "first window", "\tSkipped unreadable window (Accessibility role unavailable or not AXWindow).", "last window"
+            ]))
+        }
+
         describe("approximate rect comparison") {
             it("tolerates some provided error") {
                 let rect = CGRect(x: 100, y: 100, width: 100, height: 100)

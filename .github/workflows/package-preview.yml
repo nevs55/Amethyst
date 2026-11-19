@@ -11,13 +11,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install build dependencies
         run: brew bundle
+      - name: Run macOS unit tests
+        run: |
+          set -o pipefail
+          xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst test | xcbeautify
       - name: Build universal Release app
         run: |
           set -o pipefail
           xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/build" \
             ONLY_ACTIVE_ARCH=NO 'ARCHS=arm64 x86_64' CODE_SIGNING_ALLOWED=NO \
-            CURRENT_PROJECT_VERSION=131 build | xcbeautify
+            CURRENT_PROJECT_VERSION=132 build | xcbeautify
       - name: Package and verify the app
         run: |
           set -eu
@@ -28,7 +32,7 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool false' "$app/Contents/Info.plist"
           codesign --force --deep --sign - "$app"
           ln -s /Applications "$stage/Applications"
-          image=Amethyst-per-display-preview.dmg
+          image=Amethyst-preview-132.dmg
           hdiutil create -quiet -volname 'Amethyst Preview' -srcfolder "$stage" -format UDZO "$image"
           mount="$RUNNER_TEMP/verify-preview"
           hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$image"
@@ -36,11 +40,13 @@ jobs:
           app="$mount/Amethyst.app"
           codesign --verify --deep --strict --verbose "$app"
           lipo "$app/Contents/MacOS/Amethyst" -verify_arch arm64 x86_64
-          "$app/Contents/MacOS/Amethyst" --help
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = 132
+          "$app/Contents/MacOS/Amethyst" debug windows --redact-window-titles > "$RUNNER_TEMP/windows-report.txt"
+          grep -q '^Accessibility access for this diagnostic:' "$RUNNER_TEMP/windows-report.txt"
           shasum -a 256 "$image"
       - uses: actions/upload-artifact@v4
         with:
           name: Amethyst-per-display-preview
-          path: Amethyst-per-display-preview.dmg
+          path: Amethyst-preview-132.dmg
           compression-level: 0
           if-no-files-found: error

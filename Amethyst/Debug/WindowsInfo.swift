@@ -3,7 +3,7 @@
 //  Amethyst
 //
 //  Created by Ian Ynda-Hummel on 3/5/23.
-//  Copyright © 2023 Ian Ynda-Hummel. All rights reserved.
+//  Copyright Ã‚Â© 2023 Ian Ynda-Hummel. All rights reserved.
 //
 
 import ArgumentParser
@@ -36,16 +36,22 @@ struct Windows: ParsableCommand {
     @Flag(help: "Redact window titles.")
     var redactWindowTitles = false
 
+    static func windowReport<Element>(for elements: [Element], describe: (Element) -> String?) -> String {
+        return elements.map { element in
+            describe(element) ?? "\tSkipped unreadable window (Accessibility role unavailable or not AXWindow)."
+        }.joined(separator: "\n\n")
+    }
+
     mutating func run() throws {
+        print("Accessibility access for this diagnostic: \(AXIsProcessTrusted() ? "granted" : "not granted")")
         let applications = NSWorkspace.shared.runningApplications
         for application in applications where includeUnmanaged || application.isManageable == .manageable {
             let app = SIApplication(runningApplication: application)
             print("\(app.title() ?? "<no title>") (pid \(app.pid()))")
-            for window in app.windows() {
-                let axWindow = AXWindow(element: window)!
-                print(axWindow.debugInfo(redactTitles: redactWindowTitles))
-                print("")
-            }
+            let elements: [SIWindow] = app.windows()
+            print(Self.windowReport(for: elements) { element in
+                AXWindow(element: element)?.debugInfo(redactTitles: redactWindowTitles)
+            })
         }
     }
 }
