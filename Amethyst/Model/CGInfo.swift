@@ -36,10 +36,13 @@ struct CGWindowsInfo<Window: WindowType> {
      - Returns:
      The set of windows that are currently active.
      */
-    func activeIDs() -> Set<CGWindowID> {
+    static func onScreenIDs() -> Set<CGWindowID>? {
+        guard let info = Self(options: .optionOnScreenOnly, windowID: kCGNullWindowID) else {
+            return nil
+        }
         var ids: Set<CGWindowID> = Set()
 
-        for windowDescription in descriptions {
+        for windowDescription in info.descriptions {
             guard let windowID = windowDescription[kCGWindowNumber as String] as? NSNumber else {
                 continue
             }

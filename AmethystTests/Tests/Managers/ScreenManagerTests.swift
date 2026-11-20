@@ -469,7 +469,81 @@ final class StatusLayoutsMenuTests: XCTestCase {
     }
 }
 
+private final class WindowCloseTestDelegate: ScreenManagerDelegate {
+    typealias Window = TestWindow
+
+    let tracker: TrackedWindows<TestWindow>
+    var didReflow: (() -> Void)?
+
+    init(tracker: TrackedWindows<TestWindow>) {
+        self.tracker = tracker
+    }
+
+    func applyWindowLimit(forScreenManager screenManager: ScreenManager<WindowCloseTestDelegate>, minimizingIn range: (Int) -> Range<Int>) {}
+    func activeWindowSet(forScreenManager screenManager: ScreenManager<WindowCloseTestDelegate>, on screen: TestScreen) -> WindowSet<TestWindow> {
+        tracker.windowSet(forActiveWindowsOnScreen: screen)
+    }
+    func onReflowInitiation() {}
+    func onReflowCompletion() { didReflow?() }
+}
+
 final class TallWindowCloseTests: XCTestCase {
+    @MainActor func testClosingNativeWindowTriggersTallReflowWithoutAXOrMouseEvent() async throws {
+        let screen = TestScreen(frame: CGRect(x: 0, y: 0, width: 3840, height: 1600), id: "external")
+        let previousDescriptions = TestScreen.descriptions
+        defer { TestScreen.descriptions = previousDescriptions }
+        TestScreen.descriptions = [JSON(["Display Identifier": "external", "Current Space": ["ManagedSpaceID": 1, "type": 0, "uuid": "space"]])]
+        let nativeWindows = (0..<4).map { index in
+            let panel = NSPanel(contentRect: CGRect(x: 100 + index * 80, y: 100, width: 70, height: 70), styleMask: .borderless, backing: .buffered, defer: false)
+            panel.isReleasedWhenClosed = false
+            panel.hidesOnDeactivate = false
+            panel.orderFrontRegardless()
+            return panel
+        }
+        defer { nativeWindows.forEach { $0.orderOut(nil) } }
+        let tracker = TrackedWindows<TestWindow>(spaceForWindow: { _ in 1 })
+        let windows = try nativeWindows.map { panel in
+            let window = try XCTUnwrap(TestWindow(element: nil))
+            window.cgWindowID = CGWindowID(panel.windowNumber)
+            window.testScreen = screen
+            tracker.add(window: window, atFront: false)
+            return window
+        }
+        let delegate = WindowCloseTestDelegate(tracker: tracker)
+        let config = UserConfiguration(storage: TestConfigurationStorage())
+        config.setLayoutKeys(["tall"])
+        let manager = ScreenManager(screen: screen, delegate: delegate, userConfiguration: config)
+        manager.updateSpace(to: Space(id: 1, type: CGSSpaceTypeUser, uuid: "space"))
+        let initialLayout = expectation(description: "Four windows tiled")
+        delegate.didReflow = { initialLayout.fulfill() }
+        manager.setNeedsReflow()
+        await fulfillment(of: [initialLayout], timeout: 5)
+        XCTAssertEqual(windows[1].frame(), CGRect(x: 1920, y: 0, width: 1920, height: 533))
+
+        // No AX observer is registered for the panels. Only the production timer can
+        // request another reflow after close returns.
+        let resized = expectation(description: "Closing the top tile resizes the two survivors")
+        delegate.didReflow = { resized.fulfill() }
+        let timer = ScreenManager.observeWindowClosures(on: { [manager] }, interval: 0.1)
+        defer { timer.invalidate() }
+        nativeWindows[1].close()
+        await fulfillment(of: [resized], timeout: 5)
+        XCTAssertEqual(windows[0].frame(), CGRect(x: 0, y: 0, width: 1920, height: 1600))
+        XCTAssertEqual(windows[2].frame(), CGRect(x: 1920, y: 0, width: 1920, height: 800))
+        XCTAssertEqual(windows[3].frame(), CGRect(x: 1920, y: 800, width: 1920, height: 800))
+        XCTAssertEqual(tracker.windows.count, 4, "A window leaving the screen is not proof of destruction")
+
+        let unnecessaryReflow = expectation(description: "Stable tiles keep their frames")
+        unnecessaryReflow.isInverted = true
+        delegate.didReflow = { unnecessaryReflow.fulfill() }
+        let missingSnapshot = ScreenManager.observeWindowClosures(on: { [manager] }, interval: 0.05, visibleIDs: { nil })
+        defer { missingSnapshot.invalidate() }
+        let unrelatedPanel = NSPanel(contentRect: .init(x: 80, y: 80, width: 60, height: 60), styleMask: .borderless, backing: .buffered, defer: false)
+        unrelatedPanel.orderFrontRegardless()
+        unrelatedPanel.orderOut(nil)
+        await fulfillment(of: [unnecessaryReflow], timeout: 0.4)
+    }
+
     @MainActor func testClosingTopRightResizesRemainingWindowsBeforeDestroyNotification() async throws {
         let screen = TestScreen(frame: CGRect(x: 0, y: 0, width: 3840, height: 1600), id: "external")
         let previousDescriptions = TestScreen.descriptions

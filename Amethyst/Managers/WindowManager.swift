@@ -64,6 +64,7 @@ final class WindowManager<Application: ApplicationType>: NSObject, Codable {
     private var applicationObservations: [pid_t: UndeterminedApplication] = [:]
     private var screens: Screens
     private let windows = TrackedWindows<Window>()
+    private var windowClosureTimer: Timer?
     private var lastReflowTime = Date()
     private var lastFocusDate: Date?
     private var pendingTabDetection: [Window.WindowID: Window] = [:]
@@ -114,9 +115,13 @@ final class WindowManager<Application: ApplicationType>: NSObject, Codable {
 
         reevaluateWindows()
         screens.updateScreens(windowManager: self)
+        windowClosureTimer = ScreenManager<WindowManager<Application>>.observeWindowClosures(on: { [weak self] in
+            self?.screens.screenManagers ?? []
+        })
     }
 
     deinit {
+        windowClosureTimer?.invalidate()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
     }

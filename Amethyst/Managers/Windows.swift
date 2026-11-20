@@ -20,9 +20,8 @@ final class TrackedWindows<Window: WindowType> {
     private let onScreenIDs: () -> Set<CGWindowID>?
     private let spaceForWindow: (Window) -> Int?
 
-    init(onScreenIDs: @escaping () -> Set<CGWindowID>? = {
-        CGWindowsInfo<Window>(options: .optionOnScreenOnly, windowID: 0)?.activeIDs()
-    }, spaceForWindow: @escaping (Window) -> Int? = CGWindowsInfo<Window>.windowSpace) {
+    init(onScreenIDs: @escaping () -> Set<CGWindowID>? = CGWindowsInfo<Window>.onScreenIDs,
+         spaceForWindow: @escaping (Window) -> Int? = CGWindowsInfo<Window>.windowSpace) {
         self.onScreenIDs = onScreenIDs
         self.spaceForWindow = spaceForWindow
     }
@@ -219,7 +218,9 @@ final class TrackedWindows<Window: WindowType> {
     }
 
     func regenerateActiveIDCache() {
-        activeIDCache = onScreenIDs() ?? []
+        if let ids = onScreenIDs() {
+            activeIDCache = ids
+        }
     }
 
     // MARK: Window Sets

@@ -51,6 +51,7 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
         target: nil
     )
     private let reflowOperationQueue = OperationQueue()
+    private var tiledWindowIDs = Set<CGWindowID>()
 
     private var layouts: [Layout<Window>] = []
     private struct Selection: Codable {
@@ -177,6 +178,7 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
     }
 
     func updateSpace(to space: Space) {
+        tiledWindowIDs.removeAll()
         self.space = space
         layouts = layouts(for: space)
         let selection = selectionsBySpaceUUID[space.uuid]
@@ -240,6 +242,27 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
         }
     }
 
+    /// A window can leave the screen without an AX destroy event. Compare only windows
+    /// assigned a tile, using one WindowServer snapshot for all connected displays.
+    static func observeWindowClosures(
+        on screens: @escaping () -> [ScreenManager<Delegate>],
+        interval: TimeInterval = 1,
+        visibleIDs: @escaping () -> Set<CGWindowID>? = CGWindowsInfo<Window>.onScreenIDs
+    ) -> Timer {
+        let timer = Timer(timeInterval: interval, repeats: true) { _ in
+            let tiledScreens = screens().filter { $0.userConfiguration.tilingEnabled && $0.tiledWindowIDs.count > 1 }
+            guard !tiledScreens.isEmpty, let visible = visibleIDs() else { return }
+
+            for screen in tiledScreens where !screen.tiledWindowIDs.isSubset(of: visible) {
+                screen.tiledWindowIDs.formIntersection(visible)
+                screen.setNeedsReflow()
+            }
+        }
+        timer.tolerance = interval / 5
+        RunLoop.main.add(timer, forMode: .common)
+        return timer
+    }
+
     private func minimizeWindows() {
         let mainPaneCount = (currentLayout as? PanedLayout)?.mainPaneCount ?? 0
 
@@ -294,8 +317,10 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
         }
 
         guard let layout = currentLayout, let frameAssignments = layout.frameAssignments(windows, on: screen) else {
+            tiledWindowIDs.removeAll()
             return
         }
+        tiledWindowIDs = Set(frameAssignments.compactMap { windows.cgID(of: $0.frameAssignment.window) })
 
         // TODO: fix mff
 //        let mouseFollowsFocus = userConfiguration.mouseFollowsFocus()
