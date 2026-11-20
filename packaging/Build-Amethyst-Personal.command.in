@@ -19,8 +19,13 @@ signer_certificate() {
         /usr/bin/openssl x509 -inform DER -in "$work/signer-0" -out "$2"
 }
 
+check_certificate_trust() {
+    /usr/bin/openssl x509 -in "$1" -noout -issuer -dates
+    /usr/bin/security verify-cert -p codeSign -c "$1"
+}
+
 explain_signing_failure() {
-    echo 'macOS could not sign a temporary test program with the selected Apple Development identity.'
+    echo 'The Apple Development signing check failed.'
     echo 'Keychain reports the following Apple Development identities and totals:'
     local listing
     if ! listing=$(/usr/bin/security find-identity -p codesigning); then
@@ -28,12 +33,24 @@ explain_signing_failure() {
         return
     fi
     printf '%s\n' "$listing" | /usr/bin/awk '/"Apple Development:|identit(y|ies) found/'
-    if [[ "$listing" == *'"Apple Development:'* ]]; then
-        echo 'Keychain lists an Apple Development identity. Check the signing error above and its expiration and trust details in Keychain Access.'
-    elif /usr/bin/security find-certificate -c 'Apple Development:' >/dev/null 2>&1; then
-        echo 'An Apple Development certificate is visible. In Keychain Access > My Certificates, expand it and check for its private key. Review any validity error above.'
-    else
+    if ! /usr/bin/security find-certificate -a -c 'Apple Development:' -p > "$work/candidates.pem"; then
         echo 'In Xcode > Settings > Accounts > your Personal Team > Manage Certificates, check the status of the certificate created on this Mac and macOS account.'
+        return
+    fi
+    (cd "$work" && /usr/bin/awk '/BEGIN CERTIFICATE/ {file = "candidate-" ++n ".pem"} file {print > file} /END CERTIFICATE/ {close(file); file=""}' candidates.pem)
+    local pem sha fingerprint
+    for pem in "$work"/candidate-*.pem; do
+        [[ -f "$pem" ]] || break
+        sha=$(/usr/bin/openssl x509 -in "$pem" -noout -sha1 -fingerprint)
+        fingerprint=$(printf '%s' "${sha#*=}" | /usr/bin/tr -d ':')
+        if [[ "$listing" == *'"Apple Development:'* && "$listing" != *"$fingerprint"* ]]; then continue; fi
+        echo "Code-signing trust for $fingerprint"
+        if ! check_certificate_trust "$pem"; then
+            echo 'macOS rejected this certificate for code signing. See the trust error and validity dates above.'
+        fi
+    done
+    if [[ "$listing" != *'"Apple Development:'* ]]; then
+        echo 'A certificate is visible but Keychain lists no matching identity. In Keychain Access > My Certificates, expand the certificate and check for its private key.'
     fi
 }
 
@@ -73,7 +90,10 @@ choose_identity() {
         echo 'If codesign reports multiple matches, rerun this file with the full quoted certificate name or its SHA-1 as an argument.'
         return 1
     fi
-    /usr/bin/codesign --verify -R='anchor apple generic' "$probe" || return 1
+    if ! /usr/bin/codesign --verify -R='anchor apple generic' "$probe"; then
+        explain_signing_failure
+        return 1
+    fi
     signer_certificate "$probe" "$pem"
     name=$(/usr/bin/openssl x509 -in "$pem" -noout -subject -nameopt sep_multiline,sname |
         /usr/bin/sed -En 's/^[[:space:]]*CN[[:space:]]*=[[:space:]]*(Apple Development: .*)$/\1/p')
