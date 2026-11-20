@@ -1,0 +1,41 @@
+name: Verify official build 130 restore
+on:
+  push:
+    branches: [verify/restore-official-130]
+permissions:
+  contents: read
+jobs:
+  restore:
+    runs-on: xcode-27
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore the missing official app beside a running build 135
+        run: |
+          set -euo pipefail
+          installed=/Applications/Amethyst.app
+          official="$HOME/Applications/Amethyst Test 130/Amethyst.app"
+          test ! -e "$official" && test ! -e "$installed"
+          cd "$RUNNER_TEMP"
+          curl -fsSLo preview.dmg https://github.com/nevs55/Amethyst/releases/download/per-display-preview.5/Amethyst-preview-135.dmg
+          echo '5fc130b8e94c6f3e890a68d2e3fd963ef8d056ed1e7d3b8c9ff1b298f3293ed6  preview.dmg' | shasum -a 256 -c -
+          hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/preview" preview.dmg
+          sudo ditto "$RUNNER_TEMP/preview/Amethyst.app" "$installed"
+          hdiutil detach "$RUNNER_TEMP/preview"
+          shasum -a 256 "$installed/Contents/MacOS/Amethyst" > installed.sha
+          open "$installed"
+          for ((i=0; i<30; i++)); do
+            pgrep -x Amethyst >/dev/null && break
+            sleep 0.25
+          done
+          previous_pid=$(pgrep -x Amethyst)
+          helper="$GITHUB_WORKSPACE/packaging/Restore-Amethyst-130.command"
+          /bin/bash "$helper"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$official/Contents/Info.plist")" = 130
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$installed/Contents/Info.plist")" = 135
+          shasum -a 256 -c installed.sha
+          official_pid=$(pgrep -x Amethyst)
+          test "$previous_pid" != "$official_pid"
+          test "$(ps -p "$official_pid" -o comm=)" = "$official/Contents/MacOS/Amethyst"
+          /bin/bash "$helper"
+          test "$(pgrep -x Amethyst)" = "$official_pid"
