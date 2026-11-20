@@ -56,15 +56,14 @@ build_app() {
     # that rewrites sources and requires Homebrew; the pinned release has passed CI.
     project=Amethyst.xcodeproj/project.pbxproj
     /usr/bin/sed -i '' -e 's/com\.amethyst\.[$][{]PRODUCT_NAME:rfc1034identifier[}]/com.github.nevs55.AmethystPreview/g' \
-        -e '/\/\* Lint \*\/,/d' "$project"
+        -e '/"CODE_SIGN_IDENTITY\[sdk=macosx\*\]"/d' -e '/\/\* Lint \*\/,/d' "$project"
     plist=Amethyst/Amethyst-Info.plist
     /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Amethyst Preview' "$plist"
     /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool false' "$plist"
     /usr/bin/xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -configuration Release \
         -destination 'platform=macOS' -derivedDataPath "$work/build" -onlyUsePackageVersionsFromResolvedFile \
         ONLY_ACTIVE_ARCH=YES CODE_SIGN_STYLE=Manual "DEVELOPMENT_TEAM=$team" \
-        "CODE_SIGN_IDENTITY=$fingerprint" "CODE_SIGN_IDENTITY[sdk=macosx*]=$fingerprint" \
-        "CURRENT_PROJECT_VERSION=$build" -quiet build
+        "CODE_SIGN_IDENTITY=$fingerprint" "CURRENT_PROJECT_VERSION=$build" -quiet build
 }
 
 install_app() {
