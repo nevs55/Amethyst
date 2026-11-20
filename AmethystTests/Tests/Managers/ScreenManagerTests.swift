@@ -494,13 +494,24 @@ final class TallWindowCloseTests: XCTestCase {
         defer { TestScreen.descriptions = previousDescriptions }
         TestScreen.descriptions = [JSON(["Display Identifier": "external", "Current Space": ["ManagedSpaceID": 1, "type": 0, "uuid": "space"]])]
         let nativeWindows = (0..<4).map { index in
-            let panel = NSPanel(contentRect: CGRect(x: 100 + index * 80, y: 100, width: 70, height: 70), styleMask: .borderless, backing: .buffered, defer: false)
-            panel.isReleasedWhenClosed = false
-            panel.hidesOnDeactivate = false
-            panel.orderFrontRegardless()
-            return panel
+            let window = NSWindow(contentRect: CGRect(x: 100 + index * 100, y: 100, width: 90, height: 90), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.tabbingMode = .disallowed
+            window.orderFrontRegardless()
+            window.display()
+            return window
         }
         defer { nativeWindows.forEach { $0.orderOut(nil) } }
+        let nativeIDs = Set(nativeWindows.map { CGWindowID($0.windowNumber) })
+        let deadline = Date().addingTimeInterval(5)
+        while !nativeIDs.isSubset(of: CGWindowsInfo<TestWindow>.onScreenIDs() ?? []), Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let onScreen = try XCTUnwrap(CGWindowsInfo<TestWindow>.onScreenIDs())
+        guard nativeIDs.isSubset(of: onScreen) else {
+            XCTFail("WindowServer did not present the test windows. Expected \(nativeIDs), found \(onScreen)")
+            return
+        }
         let tracker = TrackedWindows<TestWindow>(spaceForWindow: { _ in 1 })
         let windows = try nativeWindows.map { panel in
             let window = try XCTUnwrap(TestWindow(element: nil))
@@ -520,7 +531,7 @@ final class TallWindowCloseTests: XCTestCase {
         await fulfillment(of: [initialLayout], timeout: 5)
         XCTAssertEqual(windows[1].frame(), CGRect(x: 1920, y: 0, width: 1920, height: 533))
 
-        // No AX observer is registered for the panels. Only the production timer can
+        // No AX observer is registered for these windows. Only the production timer can
         // request another reflow after close returns.
         let resized = expectation(description: "Closing the top tile resizes the two survivors")
         delegate.didReflow = { resized.fulfill() }
