@@ -10,37 +10,77 @@ certificate_team() {
         /usr/bin/sed -En 's/^[[:space:]]*OU[[:space:]]*=[[:space:]]*([A-Z0-9]{10})[[:space:]]*$/\1/p'
 }
 
+development_identities() {
+    /usr/bin/sed -En 's/^[[:space:]]*[0-9]+\)[[:space:]]+([[:xdigit:]]{40})[[:space:]]+"(Apple Development: [^"]+)"[[:space:]]*$/\1|\2/p'
+}
+
+signer_certificate() {
+    /usr/bin/codesign --display --extract-certificates="$work/signer-" "$1" &&
+        /usr/bin/openssl x509 -inform DER -in "$work/signer-0" -out "$2"
+}
+
+explain_signing_failure() {
+    echo 'macOS could not sign a temporary test program with the selected Apple Development identity.'
+    echo 'Keychain reports the following Apple Development identities and totals:'
+    local listing
+    if ! listing=$(/usr/bin/security find-identity -p codesigning); then
+        echo 'Keychain lookup failed. See the security error above.'
+        return
+    fi
+    printf '%s\n' "$listing" | /usr/bin/awk '/"Apple Development:|identit(y|ies) found/'
+    if [[ "$listing" == *'"Apple Development:'* ]]; then
+        echo 'Keychain lists an Apple Development identity. Check the signing error above and its expiration and trust details in Keychain Access.'
+    elif /usr/bin/security find-certificate -c 'Apple Development:' >/dev/null 2>&1; then
+        echo 'An Apple Development certificate is visible. In Keychain Access > My Certificates, expand it and check for its private key. Review any validity error above.'
+    else
+        echo 'In Xcode > Settings > Accounts > your Personal Team > Manage Certificates, check the status of the certificate created on this Mac and macOS account.'
+    fi
+}
+
 choose_identity() {
     if ! /usr/bin/xcodebuild -version >/dev/null 2>&1 && [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
         export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
     fi
     /usr/bin/xcodebuild -version || { echo 'Open Xcode and finish its first-launch setup, then run this file again.'; exit 1; }
 
-    identities=()
-    while IFS= read -r line; do
-        identities+=("$line")
-    done < <(/usr/bin/security find-identity -v -p codesigning |
-        /usr/bin/sed -En 's/^[[:space:]]*[0-9]+\) ([[:xdigit:]]{40}) "(Apple Development: [^"]+)"$/\1|\2/p')
-    case ${#identities[@]} in
-        0) echo 'In Xcode Settings > Accounts > your Personal Team > Manage Certificates, create an Apple Development certificate.'; exit 1 ;;
-        1) selected=${identities[0]} ;;
-        *) echo 'Select the Apple Development identity for your Personal Team.'
-           select selected in "${identities[@]}"; do [[ -n "$selected" ]] && break; done
-           [[ -n "$selected" ]] || exit 1 ;;
-    esac
-    fingerprint=${selected%%|*}
-    name=${selected#*|}
-    # Match the public certificate to the exact identity, including after a renewal.
-    /usr/bin/security find-certificate -a -c "$name" -p |
-        (cd "$work" && /usr/bin/awk '/BEGIN CERTIFICATE/ {file = "cert-" ++n ".pem"} file {print > file} /END CERTIFICATE/ {close(file); file=""}')
-    team=
-    for pem in "$work"/cert-*.pem; do
-        [[ -f "$pem" ]] || break
-        sha=$(/usr/bin/openssl x509 -in "$pem" -noout -sha1 -fingerprint)
-        [[ "$(echo "${sha#*=}" | tr -d ':')" == "$fingerprint" ]] || continue
-        team=$(certificate_team "$pem")
-        break
-    done
+    local selector="${1:-}" line selected sha
+    if [[ -z "$selector" ]]; then
+        local identities=()
+        while IFS= read -r line; do identities+=("$line"); done < <(
+            /usr/bin/security find-identity -v -p codesigning | development_identities
+        )
+        case ${#identities[@]} in
+            # codesign can also search identities in the data protection keychain.
+            0) selector='Apple Development:' ;;
+            1) selector=${identities[0]%%|*} ;;
+            *) echo 'Select the Apple Development identity for your Personal Team.'
+               select selected in "${identities[@]}"; do [[ -n "$selected" ]] && break; done
+               [[ -n "$selected" ]] || return 1
+               selector=${selected%%|*} ;;
+        esac
+    elif [[ "$selector" != 'Apple Development: '* && ! "$selector" =~ ^[[:xdigit:]]{40}$ ]]; then
+        echo 'Use the full Apple Development certificate name or its 40-character SHA-1.'
+        return 1
+    fi
+
+    # Sign our own minimal program to check key access and read the public leaf
+    # certificate actually used by codesign, even when security cannot list it.
+    local probe="$work/signing-check" pem="$work/signing-certificate.pem"
+    echo 'Checking whether macOS can use your Apple Development signing identity...'
+    printf '%s\n' 'int main(void) { return 0; }' | /usr/bin/xcrun --sdk macosx clang -x c - -o "$probe"
+    if ! /usr/bin/codesign --force --sign "$selector" "$probe"; then
+        explain_signing_failure
+        echo 'If codesign reports multiple matches, rerun this file with the full quoted certificate name or its SHA-1 as an argument.'
+        return 1
+    fi
+    /usr/bin/codesign --verify -R='anchor apple generic' "$probe" || return 1
+    signer_certificate "$probe" "$pem"
+    name=$(/usr/bin/openssl x509 -in "$pem" -noout -subject -nameopt sep_multiline,sname |
+        /usr/bin/sed -En 's/^[[:space:]]*CN[[:space:]]*=[[:space:]]*(Apple Development: .*)$/\1/p')
+    [[ -n "$name" ]] || { echo 'The selected signer is not an Apple Development certificate.'; return 1; }
+    sha=$(/usr/bin/openssl x509 -in "$pem" -noout -sha1 -fingerprint)
+    fingerprint=$(printf '%s' "${sha#*=}" | /usr/bin/tr -d ':')
+    team=$(certificate_team "$pem")
     [[ -n "$team" ]] || { echo 'Could not read the team from the selected signing certificate.'; exit 1; }
     echo "Building Amethyst $build for this Mac with $name"
 }
@@ -107,7 +147,8 @@ install_verified_app() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     work=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/amethyst-personal.XXXXXXXX")
     trap '/bin/rm -rf -- "$work"' EXIT
-    choose_identity
+    [[ $# -le 1 ]] || { echo "Usage: $0 [Apple Development certificate name or SHA-1]"; exit 1; }
+    choose_identity "${1:-}"
     build_app
     install_app
 fi

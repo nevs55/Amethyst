@@ -23,8 +23,15 @@ jobs:
         run: |
           set -euo pipefail
           if /bin/bash Build-Amethyst-136-Personal.command > "$RUNNER_TEMP/no-identity.log" 2>&1; then exit 1; fi
-          grep -F 'create an Apple Development certificate' "$RUNNER_TEMP/no-identity.log"
+          grep -F 'macOS could not sign a temporary test program' "$RUNNER_TEMP/no-identity.log"
+          grep -F '0 valid identities found' "$RUNNER_TEMP/no-identity.log"
           source Build-Amethyst-136-Personal.command
+          fingerprint=0123456789ABCDEF0123456789ABCDEF01234567
+          records=$(printf '  1)  %s\t"Apple Development: Example (ABC)"  \n  2) %s "Developer ID Application: Example"\n  2 valid identities found\n' "$fingerprint" "$fingerprint")
+          test "$(printf '%s\n' "$records" | development_identities)" = "$fingerprint|Apple Development: Example (ABC)"
+          work=$(mktemp -d "$RUNNER_TEMP/leaf.XXXXXXXX")
+          signer_certificate "$(dirname "$(dirname "$DEVELOPER_DIR")")" "$work/xcode.pem"
+          openssl x509 -in "$work/xcode.pem" -noout -subject
           openssl req -new -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=CI fixture/OU=TESTTEAM01' \
             -keyout "$RUNNER_TEMP/fixture.key" -out "$RUNNER_TEMP/fixture.pem"
           test "$(certificate_team "$RUNNER_TEMP/fixture.pem")" = TESTTEAM01
