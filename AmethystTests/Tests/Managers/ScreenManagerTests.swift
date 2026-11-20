@@ -372,6 +372,80 @@ class ScreenManagerTests: QuickSpec {
     }
 }
 
+final class WindowTilingMenuTests: XCTestCase {
+    @MainActor func testMenuTargetsTheNamedWindowAndClearsAnUnavailableSelection() throws {
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let item = try XCTUnwrap(app.windowTilingMenuItem)
+        XCTAssertTrue(item.menu === app.statusItemMenu)
+        defer { app.configureWindowTilingMenuItem() }
+        let tracker = TrackedWindows<TestWindow>()
+        let selected = try XCTUnwrap(TestWindow(element: nil))
+        let other = try XCTUnwrap(TestWindow(element: nil))
+        [selected, other].forEach { tracker.add(window: $0, atFront: false) }
+        let previousFocus = TestWindow.focused
+        defer { TestWindow.focused = previousFocus }
+
+        func showChoice(for window: TestWindow) {
+            let id = window.id()
+            let floating = tracker.isWindowFloating(window)
+            app.configureWindowTilingMenuItem(windowName: "Document", floating: floating) {
+                _ = tracker.setFloatingOverride(!floating, forID: id)
+            }
+        }
+        showChoice(for: selected)
+        TestWindow.focused = other
+        XCTAssertEqual(item.title, "Exclude “Document” from Tiling")
+        XCTAssertTrue(item.isEnabled)
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        XCTAssertTrue(tracker.isWindowFloating(selected))
+        XCTAssertFalse(tracker.isWindowFloating(other))
+        showChoice(for: selected)
+        XCTAssertEqual(item.title, "Return “Document” to Tiling")
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        XCTAssertFalse(tracker.isWindowFloating(selected))
+
+        showChoice(for: selected)
+        tracker.remove(window: selected)
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        XCTAssertFalse(tracker.isWindowFloating(selected))
+        XCTAssertFalse(tracker.isWindowFloating(other))
+        app.configureWindowTilingMenuItem()
+        XCTAssertNil(item.representedObject)
+        XCTAssertNil(item.action)
+        XCTAssertFalse(item.isEnabled)
+    }
+
+    func testExcludingAWindowRetilesItsSiblingsAndSurvivesMinimization() throws {
+        let screen = TestScreen(frame: CGRect(x: 0, y: 0, width: 1200, height: 800), id: "external")
+        let previousDescriptions = TestScreen.descriptions
+        defer { TestScreen.descriptions = previousDescriptions }
+        TestScreen.descriptions = [JSON(["Display Identifier": "external", "Current Space": ["ManagedSpaceID": 1, "type": 0, "uuid": "space"]])]
+        let tracker = TrackedWindows<TestWindow>(onScreenIDs: { [1, 2, 3] }, spaceForWindow: { _ in 1 })
+        let windows = try (1...3).map { number in
+            let window = try XCTUnwrap(TestWindow(element: nil))
+            window.cgWindowID = CGWindowID(number)
+            window.testScreen = screen
+            tracker.add(window: window, atFront: false)
+            return window
+        }
+        let excluded = windows[1]
+        XCTAssertNotNil(tracker.setFloatingOverride(true, forID: excluded.id()))
+        let set = tracker.windowSet(forActiveWindowsOnScreen: screen)
+        XCTAssertEqual(set.windows.map(\.id), [windows[0].id(), windows[2].id()])
+        let tiles = try XCTUnwrap(TallLayout<TestWindow>().frameAssignments(set, on: screen))
+        XCTAssertEqual(tiles.last?.frameAssignment.frame, CGRect(x: 600, y: 0, width: 600, height: 800))
+        tracker.remove(window: excluded, minimized: true)
+        tracker.setFloating(false, forWindow: excluded)
+        tracker.add(window: excluded, atFront: false)
+        XCTAssertTrue(tracker.isWindowFloating(excluded))
+        XCTAssertNotNil(tracker.setFloatingOverride(false, forID: excluded.id()))
+        XCTAssertEqual(tracker.windowSet(forActiveWindowsOnScreen: screen).windows.count, 3)
+        _ = tracker.setFloatingOverride(true, forID: excluded.id())
+        tracker.remove(window: excluded)
+        XCTAssertFalse(tracker.isWindowFloating(excluded))
+    }
+}
+
 final class StatusLayoutsMenuTests: XCTestCase {
     @MainActor func testLayoutsCanBeSelectedWithoutProcessWideTrust() throws {
         let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)

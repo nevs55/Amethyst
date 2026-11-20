@@ -326,6 +326,7 @@ extension WindowManager {
         for window in application.windows() {
             remove(window: window)
         }
+        windows.clearFloatingOverrides(forPID: application.pid())
         applications.removeValue(forKey: application.pid())
     }
 
@@ -340,14 +341,14 @@ extension WindowManager {
         markAllScreensForReflow()
     }
 
-    fileprivate func remove(window: Window) {
+    fileprivate func remove(window: Window, minimized: Bool = false) {
         log.debug("Removing window: \(window)")
         pendingTabDetection.removeValue(forKey: window.id())
         earlyFocusedWindows.remove(window.id())
         distributeEventToAllScreens(.remove(window: window))
         markAllScreensForReflow()
         windows.regenerateActiveIDCache()
-        windows.remove(window: window)
+        windows.remove(window: window, minimized: minimized)
     }
 
     func toggleFloatForFocusedWindow() {
@@ -355,21 +356,33 @@ extension WindowManager {
             return
         }
 
-        guard windows.windows(onScreen: screen).contains(focusedWindow) else {
+        guard windows.isWindowTracked(focusedWindow) else {
             let windowChange: Change<Window> = .add(window: focusedWindow)
             add(window: focusedWindow)
             guard windows.window(withID: focusedWindow.id()) != nil else {
                 return
             }
-            windows.setFloating(false, forWindow: focusedWindow)
+            _ = windows.setFloatingOverride(false, forID: focusedWindow.id())
             distributeEventToScreen(screen, change: windowChange)
             markScreenForReflow(screen)
             return
         }
 
-        let windowChange: Change = windows.isWindowFloating(focusedWindow) ? .add(window: focusedWindow) : .remove(window: focusedWindow)
-        windows.setFloating(!windows.isWindowFloating(focusedWindow), forWindow: focusedWindow)
-        distributeEventToScreen(screen, change: windowChange)
+        setWindowFloating(!windows.isWindowFloating(focusedWindow), forID: focusedWindow.id())
+    }
+
+    func floatingState(forTrackedWindow window: Window) -> Bool? {
+        guard windows.isWindowTracked(window) else { return nil }
+        return windows.isWindowFloating(window)
+    }
+
+    func setWindowFloating(_ floating: Bool, forID id: Window.WindowID) {
+        guard let window = windows.setFloatingOverride(floating, forID: id) else { return }
+        guard let screen = window.screen() else {
+            markAllScreensForReflow()
+            return
+        }
+        distributeEventToScreen(screen, change: floating ? .remove(window: window) : .add(window: window))
         markScreenForReflow(screen)
     }
 
@@ -857,8 +870,8 @@ extension WindowManager: ApplicationObservationDelegate {
         add(window: window)
     }
 
-    func application(_ application: AnyApplication<Application>, didRemoveWindow window: Window) {
-        remove(window: window)
+    func application(_ application: AnyApplication<Application>, didRemoveWindow window: Window, minimized: Bool) {
+        remove(window: window, minimized: minimized)
     }
 
     func application(_ application: AnyApplication<Application>, didFocusWindow window: Window) {

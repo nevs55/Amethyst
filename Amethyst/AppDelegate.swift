@@ -32,6 +32,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @IBOutlet var versionMenuItem: NSMenuItem?
     @IBOutlet var startAtLoginMenuItem: NSMenuItem?
     @IBOutlet var toggleGlobalTilingMenuItem: NSMenuItem?
+    @IBOutlet var windowTilingMenuItem: NSMenuItem?
     @IBOutlet var layoutsMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -171,6 +172,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @IBAction func toggleGlobalTiling(_ sender: AnyObject) {
         UserConfiguration.shared.tilingEnabled = !UserConfiguration.shared.tilingEnabled
         windowManager?.markAllScreensForReflow()
+    }
+
+    private func updateWindowTilingMenu(for application: NSRunningApplication?) {
+        guard let application, let manager = windowManager,
+              let window = AXWindow.focusedWindow(in: application),
+              let floating = manager.floatingState(forTrackedWindow: window) else {
+            configureWindowTilingMenuItem()
+            return
+        }
+        let id = window.id()
+        let title = window.title()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let name = title.isEmpty ? (application.localizedName ?? "Selected Window") : title
+        configureWindowTilingMenuItem(windowName: name, floating: floating) { [weak manager] in
+            manager?.setWindowFloating(!floating, forID: id)
+        }
+    }
+
+    func configureWindowTilingMenuItem(windowName: String? = nil, floating: Bool = false, perform: (() -> Void)? = nil) {
+        guard let item = windowTilingMenuItem else { return }
+        item.representedObject = perform
+        item.target = self
+        item.action = perform == nil ? nil : #selector(applyWindowTilingChoice(_:))
+        item.isEnabled = perform != nil
+        guard let windowName else {
+            item.title = "Exclude Selected Window from Tiling"
+            return
+        }
+        let line = windowName.components(separatedBy: .newlines).joined(separator: " ")
+        let name = line.count > 48 ? String(line.prefix(47)) + "…" : line
+        item.title = floating ? "Return “\(name)” to Tiling" : "Exclude “\(name)” from Tiling"
+    }
+
+    @objc private func applyWindowTilingChoice(_ sender: NSMenuItem) {
+        (sender.representedObject as? () -> Void)?()
     }
 
     @IBAction func resetLayouts(_ sender: AnyObject) {
@@ -324,6 +359,7 @@ extension AppDelegate: NSMenuDelegate {
         if menu == statusItemMenu {
             let frontApp = NSWorkspace.shared.frontmostApplication
             let target = frontApp?.isManageable == .manageable ? frontApp : nil
+            updateWindowTilingMenu(for: target)
             permissionMenuItem.representedObject = target
             if let name = target?.localizedName {
                 permissionMenuItem.title = "Check Window Access for \(name)…"

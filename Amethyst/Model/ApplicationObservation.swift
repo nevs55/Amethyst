@@ -38,7 +38,7 @@ protocol ApplicationObservationDelegate: AnyObject {
          - application: The application the event occurred in.
          - window: The window that was removed.
      */
-    func application(_ application: AnyApplication<Application>, didRemoveWindow window: Window)
+    func application(_ application: AnyApplication<Application>, didRemoveWindow window: Window, minimized: Bool)
 
     /**
      Called when the application has focused a window.
@@ -333,7 +333,7 @@ struct ApplicationObservation<Delegate: ApplicationObservationDelegate> {
         case .windowDeminiaturized:
             delegate?.application(application, didAddWindow: window)
         case .windowMiniaturized:
-            delegate?.application(application, didRemoveWindow: window)
+            delegate?.application(application, didRemoveWindow: window, minimized: true)
         case .focusedWindowChanged:
             guard let focusedWindow = Window.currentlyFocused() else {
                 return
@@ -348,7 +348,7 @@ struct ApplicationObservation<Delegate: ApplicationObservationDelegate> {
         case .mainWindowChanged:
             delegate?.application(application, didFindPotentiallyNewWindow: window)
         case .elementDestroyed:
-            delegate?.application(application, didRemoveWindow: window)
+            delegate?.application(application, didRemoveWindow: window, minimized: false)
         }
     }
 }

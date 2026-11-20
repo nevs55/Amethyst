@@ -16,7 +16,12 @@ final class TrackedWindows<Window: WindowType> {
     private(set) var lastMainWindows: [CGSSpaceID: Window] = [:]
     private var activeIDCache: Set<CGWindowID> = Set()
     private var deactivatedPIDs: Set<pid_t> = Set()
-    private var floatingMap: [Window.WindowID: Bool] = [:]
+    private struct FloatingState {
+        let isFloating: Bool
+        // A manual choice follows this window through minimization until it closes.
+        let overrideOwner: pid_t?
+    }
+    private var floatingMap: [Window.WindowID: FloatingState] = [:]
     private let onScreenIDs: () -> Set<CGWindowID>?
     private let spaceForWindow: (Window) -> Int?
 
@@ -106,9 +111,11 @@ final class TrackedWindows<Window: WindowType> {
         lastMainWindows[spaceID] = window
     }
 
-    func remove(window: Window) {
+    func remove(window: Window, minimized: Bool = false) {
         let id = window.id()
-        floatingMap.removeValue(forKey: id)
+        if !minimized || floatingMap[id]?.overrideOwner == nil {
+            floatingMap.removeValue(forKey: id)
+        }
         lastMainWindows = lastMainWindows.filter { $0.value.id() != id }
 
         guard let windowIndex = windows.firstIndex(where: { $0.id() == window.id() }) else {
@@ -202,11 +209,23 @@ final class TrackedWindows<Window: WindowType> {
     }
 
     func isWindowFloating(_ window: Window) -> Bool {
-        return floatingMap[window.id()] ?? false
+        return floatingMap[window.id()]?.isFloating ?? false
     }
 
     func setFloating(_ floating: Bool, forWindow window: Window) {
-        floatingMap[window.id()] = floating
+        let id = window.id()
+        guard floatingMap[id]?.overrideOwner == nil else { return }
+        floatingMap[id] = FloatingState(isFloating: floating, overrideOwner: nil)
+    }
+
+    func setFloatingOverride(_ floating: Bool, forID id: Window.WindowID) -> Window? {
+        guard let window = window(withID: id), isWindowFloating(window) != floating else { return nil }
+        floatingMap[id] = FloatingState(isFloating: floating, overrideOwner: window.pid())
+        return window
+    }
+
+    func clearFloatingOverrides(forPID pid: pid_t) {
+        floatingMap = floatingMap.filter { $0.value.overrideOwner != pid }
     }
 
     func activateApplication(withPID pid: pid_t) {
@@ -253,7 +272,7 @@ final class TrackedWindows<Window: WindowType> {
                 return window.isActive() && snapshotActiveIDCache.contains(window.cgID())
             },
             isWindowWithIDFloating: { windowID -> Bool in
-                return snapshotFloatingMap[windowID] ?? false
+                return snapshotFloatingMap[windowID]?.isFloating ?? false
             },
             windowForID: { windowID -> Window? in
                 return snapshotWindowsByID[windowID]

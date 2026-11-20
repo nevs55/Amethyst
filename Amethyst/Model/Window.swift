@@ -229,6 +229,18 @@ extension AXWindow: WindowType {
         return SIWindow.focused().flatMap { AXWindow(axElement: $0.axElementRef) }
     }
 
+    /// Query the front app directly so a per-app window-control grant is sufficient.
+    static func focusedWindow(in application: NSRunningApplication) -> AXWindow? {
+        let element = AXUIElementCreateApplication(application.processIdentifier)
+        AXUIElementSetMessagingTimeout(element, 0.25)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        let window = AXWindow(axElement: (value as! AXUIElement))
+        guard window.cgID() != kCGNullWindowID, window.pid() == application.processIdentifier else { return nil }
+        return window
+    }
+
     /**
      The Silica initializer is not failable because it can always assume it has a reference to an ax element. The window type in general does not make that assumption and thus has a failable initializer. This just ports one into the other.
      
