@@ -1,0 +1,114 @@
+#!/bin/bash
+set -eo pipefail
+build=__PERSONAL_BUILD__
+revision=__SOURCE_REVISION__
+bundle_id=com.github.nevs55.AmethystPreview
+installed=/Applications/Amethyst.app
+
+certificate_team() {
+    /usr/bin/openssl x509 -in "$1" -noout -subject -nameopt sep_multiline,sname |
+        /usr/bin/sed -En 's/^[[:space:]]*OU[[:space:]]*=[[:space:]]*([A-Z0-9]{10})[[:space:]]*$/\1/p'
+}
+
+choose_identity() {
+    if ! /usr/bin/xcodebuild -version >/dev/null 2>&1 && [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+        export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    fi
+    /usr/bin/xcodebuild -version || { echo 'Open Xcode and finish its first-launch setup, then run this file again.'; exit 1; }
+
+    identities=()
+    while IFS= read -r line; do
+        identities+=("$line")
+    done < <(/usr/bin/security find-identity -v -p codesigning |
+        /usr/bin/sed -En 's/^[[:space:]]*[0-9]+\) ([[:xdigit:]]{40}) "(Apple Development: [^"]+)"$/\1|\2/p')
+    case ${#identities[@]} in
+        0) echo 'In Xcode Settings > Accounts > your Personal Team > Manage Certificates, create an Apple Development certificate.'; exit 1 ;;
+        1) selected=${identities[0]} ;;
+        *) echo 'Select the Apple Development identity for your Personal Team.'
+           select selected in "${identities[@]}"; do [[ -n "$selected" ]] && break; done
+           [[ -n "$selected" ]] || exit 1 ;;
+    esac
+    fingerprint=${selected%%|*}
+    name=${selected#*|}
+    # Match the public certificate to the exact identity, including after a renewal.
+    /usr/bin/security find-certificate -a -c "$name" -p |
+        (cd "$work" && /usr/bin/awk '/BEGIN CERTIFICATE/ {file = "cert-" ++n ".pem"} file {print > file} /END CERTIFICATE/ {close(file); file=""}')
+    team=
+    for pem in "$work"/cert-*.pem; do
+        [[ -f "$pem" ]] || break
+        sha=$(/usr/bin/openssl x509 -in "$pem" -noout -sha1 -fingerprint)
+        [[ "$(echo "${sha#*=}" | tr -d ':')" == "$fingerprint" ]] || continue
+        team=$(certificate_team "$pem")
+        break
+    done
+    [[ -n "$team" ]] || { echo 'Could not read the team from the selected signing certificate.'; exit 1; }
+    echo "Building Amethyst $build for this Mac with $name"
+}
+
+build_app() {
+    src="$work/source"
+    /usr/bin/git init -q "$src"
+    /usr/bin/git -C "$src" fetch --quiet --depth=1 https://github.com/nevs55/Amethyst.git "$revision"
+    /usr/bin/git -C "$src" checkout --quiet --detach FETCH_HEAD
+    [[ "$(/usr/bin/git -C "$src" rev-parse HEAD)" == "$revision" ]] || { echo 'Unexpected source revision.'; exit 1; }
+    cd "$src"
+    # Configure only the app target in this disposable checkout. Skip the lint phase
+    # that rewrites sources and requires Homebrew; the pinned release has passed CI.
+    project=Amethyst.xcodeproj/project.pbxproj
+    /usr/bin/sed -i '' -e 's/com\.amethyst\.[$][{]PRODUCT_NAME:rfc1034identifier[}]/com.github.nevs55.AmethystPreview/g' \
+        -e '/\/\* Lint \*\/,/d' "$project"
+    plist=Amethyst/Amethyst-Info.plist
+    /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Amethyst Preview' "$plist"
+    /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool false' "$plist"
+    /usr/bin/xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -configuration Release \
+        -destination 'platform=macOS' -derivedDataPath "$work/build" -onlyUsePackageVersionsFromResolvedFile \
+        ONLY_ACTIVE_ARCH=YES CODE_SIGN_STYLE=Manual "DEVELOPMENT_TEAM=$team" \
+        "CODE_SIGN_IDENTITY=$fingerprint" "CODE_SIGN_IDENTITY[sdk=macosx*]=$fingerprint" \
+        "CURRENT_PROJECT_VERSION=$build" -quiet build
+}
+
+install_app() {
+    app="$work/build/Build/Products/Release/Amethyst.app"
+    requirement="identifier \"$bundle_id\" and anchor apple generic and certificate leaf = H\"$fingerprint\""
+    /usr/bin/codesign --verify --strict --deep "$app" || return 1
+    /usr/bin/codesign --verify -R="$requirement" "$app" || return 1
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" == "$build" ]] || return 1
+
+    # An existing personal build's permission belongs to its designated requirement.
+    # Check compatibility in both directions before quitting the running app.
+    designated_requirement() {
+        /usr/bin/codesign -d -r- "$1" 2>&1 | /usr/bin/sed -n 's/^designated => //p'
+    }
+    if [[ -d "$installed" ]] && /usr/bin/codesign -dvv "$installed" 2>&1 | /usr/bin/grep -q '^Authority=Apple Development:'; then
+        old_req=$(designated_requirement "$installed")
+        new_req=$(designated_requirement "$app")
+        if [[ -z "$old_req" || -z "$new_req" ]] || ! /usr/bin/codesign --verify -R="$old_req" "$app" ||
+            ! /usr/bin/codesign --verify -R="$new_req" "$installed"; then
+            echo 'The installed development build uses a different signing identity. Select its original identity and try again.'
+            exit 1
+        fi
+    fi
+
+    install_verified_app
+}
+
+# Use the release's own verified installer and backup/rollback path.
+install_verified_app() {
+    stage="$work/image"
+    /bin/mkdir "$stage"
+    /usr/bin/ditto "$app" "$stage/Amethyst.app"
+    image="$work/Amethyst-preview-$build.dmg"
+    /usr/bin/hdiutil create -quiet -volname 'Amethyst Personal' -srcfolder "$stage" -format UDZO "$image"
+    digest=$(/usr/bin/shasum -a 256 "$image" | /usr/bin/awk '{print $1}')
+    /usr/bin/sed -e "s/__DMG_SHA256__/$digest/g" -e "s/__BUILD__/$build/g" \
+        packaging/Update-Amethyst.command.in > "$work/Install.command"
+    /bin/bash "$work/Install.command"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    work=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/amethyst-personal.XXXXXXXX")
+    trap '/bin/rm -rf -- "$work"' EXIT
+    choose_identity
+    build_app
+    install_app
+fi

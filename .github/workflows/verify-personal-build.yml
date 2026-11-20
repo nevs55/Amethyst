@@ -1,0 +1,54 @@
+name: Verify personal Amethyst build
+on:
+  push:
+    paths:
+      - packaging/Build-Amethyst-Personal.command.in
+      - .github/workflows/verify-personal-build.yml
+jobs:
+  verify:
+    runs-on: xcode-27
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate the helper for released build 136
+        run: |
+          sed -e 's/__SOURCE_REVISION__/b31d6936267adf85ff8f2de07ebb181d3b0bf724/g' -e 's/__PERSONAL_BUILD__/136/g' \
+            packaging/Build-Amethyst-Personal.command.in > Build-Amethyst-136-Personal.command
+          chmod +x Build-Amethyst-136-Personal.command
+          /bin/bash -n Build-Amethyst-136-Personal.command
+      - name: Check certificate selection on a clean runner
+        run: |
+          set -euo pipefail
+          if /bin/bash Build-Amethyst-136-Personal.command > "$RUNNER_TEMP/no-identity.log" 2>&1; then exit 1; fi
+          grep -F 'create an Apple Development certificate' "$RUNNER_TEMP/no-identity.log"
+          source Build-Amethyst-136-Personal.command
+          openssl req -new -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=CI fixture/OU=TESTTEAM01' \
+            -keyout "$RUNNER_TEMP/fixture.key" -out "$RUNNER_TEMP/fixture.pem"
+          test "$(certificate_team "$RUNNER_TEMP/fixture.pem")" = TESTTEAM01
+      - name: Compile the pinned source and exercise the installer
+        run: |
+          set -eo pipefail
+          source Build-Amethyst-136-Personal.command
+          work=$(mktemp -d "$RUNNER_TEMP/personal.XXXXXXXX")
+          # The runner holds no developer key. Exercise Xcode with a local test
+          # signature, then confirm that the personal installer rejects it.
+          fingerprint=-
+          team=
+          build_app
+          app="$work/build/Build/Products/Release/Amethyst.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist")" = "$bundle_id"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = 136
+          codesign --verify --deep --strict "$app"
+          fingerprint=0000000000000000000000000000000000000000
+          if install_app; then exit 1; fi
+          test ! -e /Applications/Amethyst.app
+          # Exercise packaging and installation independently of the signature gate.
+          install_verified_app
+          cmp "$app/Contents/MacOS/Amethyst" /Applications/Amethyst.app/Contents/MacOS/Amethyst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Amethyst-136-personal-builder
+          path: Build-Amethyst-136-Personal.command

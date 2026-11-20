@@ -60,12 +60,17 @@ jobs:
           sed -e "s/__DMG_SHA256__/$digest/" -e "s/__BUILD__/136/g" packaging/Update-Amethyst.command.in > Update-Amethyst-136.command
           chmod +x Update-Amethyst-136.command
           bash -n Update-Amethyst-136.command
+          sed -e "s/__SOURCE_REVISION__/$GITHUB_SHA/g" -e 's/__PERSONAL_BUILD__/136/g' \
+            packaging/Build-Amethyst-Personal.command.in > Build-Amethyst-136-Personal.command
+          chmod +x Build-Amethyst-136-Personal.command
+          bash -n Build-Amethyst-136-Personal.command
       - uses: actions/upload-artifact@v4
         with:
           name: Amethyst-per-display-preview
           path: |
             Amethyst-preview-136.dmg
             Update-Amethyst-136.command
+            Build-Amethyst-136-Personal.command
           compression-level: 0
           if-no-files-found: error
 
