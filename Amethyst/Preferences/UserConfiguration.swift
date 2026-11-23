@@ -64,6 +64,7 @@ extension UserDefaults: ConfigurationStorage {
 enum ConfigurationKey: String {
     case layouts = "layouts"
     case displayLayoutDefaults = "display-layout-defaults"
+    case savedWindowExclusions = "saved-window-exclusions"
     case commandMod = "mod"
     case commandKey = "key"
     case mod1 = "mod1"
@@ -149,6 +150,18 @@ protocol UserConfigurationDelegate: AnyObject {
     func configurationLayoutsDidChange(_ userConfiguration: UserConfiguration)
     func configurationGlobalTilingDidChange(_ userConfiguration: UserConfiguration)
     func configurationAccessibilityPermissionsDidChange(_ userConfiguration: UserConfiguration)
+}
+
+struct WindowExclusion: Hashable {
+    let bundleIdentifier: String
+    let title: String
+
+    init?(bundleIdentifier: String?, title: String?) {
+        guard let bundleIdentifier, !bundleIdentifier.isEmpty,
+              let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        self.bundleIdentifier = bundleIdentifier
+        self.title = title
+    }
 }
 
 class FloatingBundle: NSObject {
@@ -509,6 +522,38 @@ class UserConfiguration: NSObject {
 
     private var displayLayoutDefaults: [String: String] {
         return storage.object(forKey: .displayLayoutDefaults) as? [String: String] ?? [:]
+    }
+
+    private var excludedTitlesByBundle: [String: [String]] {
+        storage.object(forKey: .savedWindowExclusions) as? [String: [String]] ?? [:]
+    }
+
+    var savedWindowExclusions: [WindowExclusion] {
+        excludedTitlesByBundle.sorted { $0.key < $1.key }.flatMap { bundle, titles in
+            titles.sorted().compactMap { WindowExclusion(bundleIdentifier: bundle, title: $0) }
+        }
+    }
+
+    func excludesWindow(in bundle: String?, title: @autoclosure () -> String?) -> Bool {
+        guard let bundle, let titles = excludedTitlesByBundle[bundle], let title = title() else { return false }
+        return titles.contains(title)
+    }
+
+    func hasWindowExclusions(in bundle: String) -> Bool {
+        excludedTitlesByBundle[bundle]?.isEmpty == false
+    }
+
+    func setWindowExclusion(_ rule: WindowExclusion, enabled: Bool) {
+        var rules = excludedTitlesByBundle
+        var titles = rules[rule.bundleIdentifier] ?? []
+        guard titles.contains(rule.title) != enabled else { return }
+        if enabled {
+            titles.append(rule.title)
+        } else {
+            titles.removeAll { $0 == rule.title }
+        }
+        rules[rule.bundleIdentifier] = titles.isEmpty ? nil : titles
+        storage.set(rules, forKey: .savedWindowExclusions)
     }
 
     func defaultLayoutKey(forDisplay displayID: String) -> String? {

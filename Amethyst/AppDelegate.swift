@@ -33,6 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @IBOutlet var startAtLoginMenuItem: NSMenuItem?
     @IBOutlet var toggleGlobalTilingMenuItem: NSMenuItem?
     @IBOutlet var windowTilingMenuItem: NSMenuItem?
+    @IBOutlet var excludedWindowsMenu: NSMenu?
     @IBOutlet var layoutsMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -175,17 +176,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateWindowTilingMenu(for application: NSRunningApplication?) {
-        guard let application, let manager = windowManager,
-              let window = AXWindow.focusedWindow(in: application),
-              let floating = manager.floatingState(forTrackedWindow: window) else {
+        let selectedRule: WindowExclusion?
+        if let application, let manager = windowManager,
+           let window = AXWindow.focusedWindow(in: application),
+           let floating = manager.floatingState(forTrackedWindow: window) {
+            let id = window.id()
+            let fullTitle = window.title()
+            selectedRule = WindowExclusion(bundleIdentifier: application.bundleIdentifier, title: fullTitle)
+            let title = fullTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let name = title.isEmpty ? (application.localizedName ?? "Selected Window") : title
+            configureWindowTilingMenuItem(windowName: name, floating: floating) { [weak manager] in
+                manager?.setWindowFloating(!floating, forID: id)
+            }
+        } else {
+            selectedRule = nil
             configureWindowTilingMenuItem()
-            return
         }
-        let id = window.id()
-        let title = window.title()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let name = title.isEmpty ? (application.localizedName ?? "Selected Window") : title
-        configureWindowTilingMenuItem(windowName: name, floating: floating) { [weak manager] in
-            manager?.setWindowFloating(!floating, forID: id)
+        let rules = UserConfiguration.shared.savedWindowExclusions
+        windowTilingMenuItem?.isHidden = selectedRule.map { rules.contains($0) } ?? false
+        if let menu = excludedWindowsMenu {
+            updateExcludedWindowsMenu(menu, selected: selectedRule, rules: rules) { [weak self] rule, enabled in
+                if let manager = self?.windowManager {
+                    manager.setWindowExclusion(rule, enabled: enabled)
+                } else {
+                    UserConfiguration.shared.setWindowExclusion(rule, enabled: enabled)
+                }
+            }
         }
     }
 
@@ -196,12 +212,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         item.action = perform == nil ? nil : #selector(applyWindowTilingChoice(_:))
         item.isEnabled = perform != nil
         guard let windowName else {
-            item.title = "Exclude Selected Window from Tiling"
+            item.title = "Temporarily Exclude Selected Window"
             return
         }
-        let line = windowName.components(separatedBy: .newlines).joined(separator: " ")
-        let name = line.count > 48 ? String(line.prefix(47)) + "…" : line
-        item.title = floating ? "Return “\(name)” to Tiling" : "Exclude “\(name)” from Tiling"
+        let name = Self.menuWindowName(windowName)
+        item.title = floating ? "Return “\(name)” to Tiling" : "Temporarily Exclude “\(name)”"
+    }
+
+    private static func menuWindowName(_ title: String) -> String {
+        let line = title.components(separatedBy: .newlines).joined(separator: " ")
+        return line.count > 48 ? String(line.prefix(47)) + "…" : line
+    }
+
+    func updateExcludedWindowsMenu(_ menu: NSMenu, selected: WindowExclusion?, rules: [WindowExclusion],
+                                   setExcluded: @escaping (WindowExclusion, Bool) -> Void) {
+        menu.removeAllItems()
+        menu.autoenablesItems = false
+        func addChoice(_ title: String, rule: WindowExclusion, enable: Bool) {
+            let item = menu.addItem(withTitle: title, action: #selector(applyWindowTilingChoice(_:)), keyEquivalent: "")
+            item.target = self
+            item.toolTip = "\(rule.bundleIdentifier)\n\(rule.title)"
+            item.representedObject = { setExcluded(rule, enable) } as () -> Void
+        }
+
+        if let selected, !rules.contains(selected) {
+            addChoice("Always Exclude “\(Self.menuWindowName(selected.title))”", rule: selected, enable: true)
+        } else {
+            let title = selected == nil ? "Select a Window with a Title to Exclude" : "Selected Window Is Already Excluded"
+            menu.addItem(withTitle: title, action: nil, keyEquivalent: "").isEnabled = false
+        }
+        menu.addItem(.separator())
+        if rules.isEmpty {
+            menu.addItem(withTitle: "No Saved Exclusions", action: nil, keyEquivalent: "").isEnabled = false
+        }
+        for rule in rules {
+            let appName = NSWorkspace.shared.urlForApplication(withBundleIdentifier: rule.bundleIdentifier)
+                .map { FileManager.default.displayName(atPath: $0.path) } ?? rule.bundleIdentifier
+            addChoice("Remove “\(Self.menuWindowName(rule.title))” (\(appName))", rule: rule, enable: false)
+        }
     }
 
     @objc private func applyWindowTilingChoice(_ sender: NSMenuItem) {

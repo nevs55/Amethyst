@@ -60,6 +60,7 @@ final class WindowManager<Application: ApplicationType>: NSObject, Codable {
     let focusTransitionCoordinator: FocusTransitionCoordinator<WindowManager<Application>>
 
     private var applications: [pid_t: AnyApplication<Application>] = [:]
+    private var exclusionBundlesByPID: [pid_t: String] = [:]
     private var deniedApplicationPIDs = Set<pid_t>()
     private var applicationObservations: [pid_t: UndeterminedApplication] = [:]
     private var screens: Screens
@@ -313,6 +314,9 @@ extension WindowManager {
                 onCompleted: { [weak self] in
                     self?.deniedApplicationPIDs.remove(application.pid())
                     self?.applications[application.pid()] = application
+                    if let bundle = NSRunningApplication(processIdentifier: application.pid())?.bundleIdentifier {
+                        self?.updateExclusionObservation(for: application, bundle: bundle)
+                    }
 
                     for window in application.windows() {
                         self?.add(window: window)
@@ -323,6 +327,7 @@ extension WindowManager {
     }
 
     fileprivate func remove(application: AnyApplication<Application>) {
+        exclusionBundlesByPID.removeValue(forKey: application.pid())
         for window in application.windows() {
             remove(window: window)
         }
@@ -374,6 +379,55 @@ extension WindowManager {
     func floatingState(forTrackedWindow window: Window) -> Bool? {
         guard windows.isWindowTracked(window) else { return nil }
         return windows.isWindowFloating(window)
+    }
+
+    func setWindowExclusion(_ rule: WindowExclusion, enabled: Bool) {
+        userConfiguration.setWindowExclusion(rule, enabled: enabled)
+        for (pid, application) in applications where NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == rule.bundleIdentifier {
+            updateExclusionObservation(for: application, bundle: rule.bundleIdentifier)
+            for window in windows.windows(forApplicationWithPID: pid) {
+                refreshSavedExclusion(for: window)
+            }
+        }
+    }
+
+    private func updateExclusionObservation(for application: AnyApplication<Application>, bundle: String) {
+        let pid = application.pid()
+        let enabled = userConfiguration.hasWindowExclusions(in: bundle)
+        guard enabled != (exclusionBundlesByPID[pid] != nil) else { return }
+        if enabled {
+            exclusionBundlesByPID[pid] = bundle
+            // A reopened document can receive its final title after its creation event.
+            _ = application.observe(notification: kAXTitleChangedNotification) { [weak self] element in
+                DispatchQueue.main.async {
+                    guard let self, self.exclusionBundlesByPID[pid] == bundle,
+                          let window = Window(element: element), self.windows.isWindowTracked(window) else { return }
+                    self.refreshSavedExclusion(for: window)
+                }
+            }
+        } else {
+            exclusionBundlesByPID.removeValue(forKey: pid)
+            application.unobserve(notification: kAXTitleChangedNotification)
+        }
+    }
+
+    private func matchesSavedExclusion(_ window: Window) -> Bool {
+        guard let bundle = exclusionBundlesByPID[window.pid()] else { return false }
+        return userConfiguration.excludesWindow(in: bundle, title: window.title())
+    }
+
+    private func refreshSavedExclusion(for window: Window) {
+        guard windows.applySavedExclusion(matchesSavedExclusion(window), to: window) else { return }
+        guard let screen = window.screen() else {
+            markAllScreensForReflow()
+            return
+        }
+        if let spaceID = CGWindowsInfo.windowSpace(window),
+           let space = CGSpacesInfo<Window>.spacesForScreen(screen)?.first(where: { $0.id == spaceID }) {
+            let change: Change<Window> = windows.isWindowFloating(window) ? .remove(window: window) : .add(window: window)
+            screenManager(for: screen)?.distributeEvent(change, to: space)
+        }
+        markScreenForReflow(screen)
     }
 
     func setWindowFloating(_ floating: Bool, forID id: Window.WindowID) {
@@ -570,6 +624,9 @@ extension WindowManager {
      destroyed observation over to it, and re-tile.
      */
     private func refreshTrackedWindow(_ window: Window, application: AnyApplication<Application>) {
+        if exclusionBundlesByPID[application.pid()] != nil {
+            refreshSavedExclusion(for: window)
+        }
         guard let staleWindow = windows.refreshWindow(window) else {
             return
         }
@@ -617,6 +674,7 @@ extension WindowManager {
             throw TrackingError.unknownSpace
         }
 
+        windows.applySavedExclusion(matchesSavedExclusion(window), to: window)
         if let otherWindow = otherWindow {
             _ = windows.replace(window: otherWindow, withWindow: window)
             distributeEventToScreen(screen, change: .tabChange(window: window, previousWindow: otherWindow))

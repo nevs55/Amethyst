@@ -17,9 +17,11 @@ final class TrackedWindows<Window: WindowType> {
     private var activeIDCache: Set<CGWindowID> = Set()
     private var deactivatedPIDs: Set<pid_t> = Set()
     private struct FloatingState {
-        let isFloating: Bool
+        var baseFloating = false
+        var excludedByRule = false
+        var isFloating: Bool { baseFloating || excludedByRule }
         // A manual choice follows this window through minimization until it closes.
-        let overrideOwner: pid_t?
+        var overrideOwner: pid_t?
     }
     private var floatingMap: [Window.WindowID: FloatingState] = [:]
     private let onScreenIDs: () -> Set<CGWindowID>?
@@ -215,12 +217,24 @@ final class TrackedWindows<Window: WindowType> {
     func setFloating(_ floating: Bool, forWindow window: Window) {
         let id = window.id()
         guard floatingMap[id]?.overrideOwner == nil else { return }
-        floatingMap[id] = FloatingState(isFloating: floating, overrideOwner: nil)
+        floatingMap[id, default: FloatingState()].baseFloating = floating
+    }
+
+    /// Returns whether the effective floating state changed and the layout needs updating.
+    @discardableResult func applySavedExclusion(_ excluded: Bool, to window: Window) -> Bool {
+        let id = window.id()
+        var state = floatingMap[id] ?? FloatingState()
+        guard state.excludedByRule != excluded else { return false }
+        let wasFloating = state.isFloating
+        state.excludedByRule = excluded
+        floatingMap[id] = state
+        return wasFloating != state.isFloating
     }
 
     func setFloatingOverride(_ floating: Bool, forID id: Window.WindowID) -> Window? {
-        guard let window = window(withID: id), isWindowFloating(window) != floating else { return nil }
-        floatingMap[id] = FloatingState(isFloating: floating, overrideOwner: window.pid())
+        guard let window = window(withID: id), floatingMap[id]?.excludedByRule != true,
+              isWindowFloating(window) != floating else { return nil }
+        floatingMap[id] = FloatingState(baseFloating: floating, overrideOwner: window.pid())
         return window
     }
 

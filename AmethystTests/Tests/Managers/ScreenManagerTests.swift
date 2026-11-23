@@ -373,6 +373,78 @@ class ScreenManagerTests: QuickSpec {
 }
 
 final class WindowTilingMenuTests: XCTestCase {
+    @MainActor func testSavedWindowMenuPersistsExactAppAndTitleAndCanRemoveItWithoutFocus() throws {
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        XCTAssertTrue(try XCTUnwrap(app.excludedWindowsMenu).supermenu === app.statusItemMenu)
+        let domain = "AmethystTests.Exclusions.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let config = UserConfiguration(storage: defaults)
+        let menu = NSMenu()
+        let rule = try XCTUnwrap(WindowExclusion(bundleIdentifier: "test.editor", title: "Plan [1].*"))
+        let other = try XCTUnwrap(WindowExclusion(bundleIdentifier: "test.viewer", title: rule.title))
+        func render(_ selected: WindowExclusion?, using configuration: UserConfiguration) {
+            app.updateExcludedWindowsMenu(menu, selected: selected, rules: configuration.savedWindowExclusions) { rule, enabled in
+                configuration.setWindowExclusion(rule, enabled: enabled)
+            }
+        }
+        func click(_ item: NSMenuItem) throws {
+            XCTAssertTrue(item.isEnabled)
+            XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        }
+        render(rule, using: config)
+        XCTAssertEqual(menu.items.last?.title, "No Saved Exclusions")
+        let save = try XCTUnwrap(menu.item(at: 0))
+        XCTAssertEqual(save.title, "Always Exclude “Plan [1].*”")
+        try click(save)
+        try click(save)
+        let reopened = UserConfiguration(storage: try XCTUnwrap(UserDefaults(suiteName: domain)))
+        reopened.loadConfiguration()
+        XCTAssertEqual(reopened.savedWindowExclusions, [rule])
+        XCTAssertTrue(reopened.excludesWindow(in: rule.bundleIdentifier, title: rule.title))
+        XCTAssertFalse(reopened.excludesWindow(in: other.bundleIdentifier, title: rule.title))
+        XCTAssertFalse(reopened.excludesWindow(in: rule.bundleIdentifier, title: "Plan 1 draft"))
+        XCTAssertFalse(reopened.excludesWindow(in: rule.bundleIdentifier, title: rule.title + " copy"))
+        XCTAssertFalse(reopened.excludesWindow(in: rule.bundleIdentifier, title: nil))
+        XCTAssertNil(WindowExclusion(bundleIdentifier: rule.bundleIdentifier, title: " \n "))
+        XCTAssertNil(WindowExclusion(bundleIdentifier: nil, title: rule.title))
+        render(rule, using: reopened)
+        XCTAssertFalse(try XCTUnwrap(menu.item(at: 0)).isEnabled)
+        render(other, using: reopened)
+        try click(try XCTUnwrap(menu.item(at: 0)))
+        render(nil, using: reopened)
+        XCTAssertFalse(try XCTUnwrap(menu.item(at: 0)).isEnabled)
+        try click(try XCTUnwrap(menu.item(withTitle: "Remove “Plan [1].*” (test.editor)")))
+        XCTAssertEqual(config.savedWindowExclusions, [other])
+        XCTAssertFalse(config.hasWindowExclusions(in: rule.bundleIdentifier))
+    }
+
+    func testSavedExclusionAppliesToReopenedWindowAndPreservesOtherFloatingChoices() throws {
+        let config = UserConfiguration(storage: TestConfigurationStorage())
+        let rule = try XCTUnwrap(WindowExclusion(bundleIdentifier: "test.editor", title: "Document"))
+        config.setWindowExclusion(rule, enabled: true)
+        let tracker = TrackedWindows<TestWindow>()
+        let original = try XCTUnwrap(TestWindow(element: nil))
+        tracker.add(window: original, atFront: false)
+        XCTAssertTrue(tracker.applySavedExclusion(config.excludesWindow(in: rule.bundleIdentifier, title: rule.title), to: original))
+        tracker.remove(window: original)
+        let reopened = try XCTUnwrap(TestWindow(element: nil))
+        tracker.add(window: reopened, atFront: false)
+        XCTAssertNotEqual(original.id(), reopened.id())
+        XCTAssertFalse(tracker.applySavedExclusion(config.excludesWindow(in: rule.bundleIdentifier, title: ""), to: reopened))
+        XCTAssertTrue(tracker.applySavedExclusion(config.excludesWindow(in: rule.bundleIdentifier, title: rule.title), to: reopened))
+        let snapshot = tracker.windowSet(forWindows: [reopened])
+        XCTAssertTrue(snapshot.isWindowFloating(try XCTUnwrap(snapshot.windows.first)))
+        XCTAssertNil(tracker.setFloatingOverride(false, forID: reopened.id()))
+        config.setWindowExclusion(rule, enabled: false)
+        XCTAssertTrue(tracker.applySavedExclusion(config.excludesWindow(in: rule.bundleIdentifier, title: rule.title), to: reopened))
+        XCTAssertFalse(tracker.isWindowFloating(reopened))
+        tracker.setFloating(true, forWindow: reopened)
+        XCTAssertFalse(tracker.applySavedExclusion(true, to: reopened))
+        XCTAssertFalse(tracker.applySavedExclusion(false, to: reopened))
+        XCTAssertTrue(tracker.isWindowFloating(reopened))
+    }
+
     @MainActor func testMenuTargetsTheNamedWindowAndClearsAnUnavailableSelection() throws {
         let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
         let item = try XCTUnwrap(app.windowTilingMenuItem)
@@ -394,7 +466,7 @@ final class WindowTilingMenuTests: XCTestCase {
         }
         showChoice(for: selected)
         TestWindow.focused = other
-        XCTAssertEqual(item.title, "Exclude “Document” from Tiling")
+        XCTAssertEqual(item.title, "Temporarily Exclude “Document”")
         XCTAssertTrue(item.isEnabled)
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
         XCTAssertTrue(tracker.isWindowFloating(selected))
