@@ -13,6 +13,7 @@ final class TrackedWindows<Window: WindowType> {
     typealias Screen = Window.Screen
 
     private(set) var windows: [Window] = []
+    private var windowsByID: [Window.WindowID: Window] = [:]
     private(set) var lastMainWindows: [CGSSpaceID: Window] = [:]
     private var activeIDCache: Set<CGWindowID> = Set()
     private var deactivatedPIDs: Set<pid_t> = Set()
@@ -36,7 +37,7 @@ final class TrackedWindows<Window: WindowType> {
     // MARK: Window Filters
 
     func window(withID id: Window.WindowID) -> Window? {
-        return windows.first { $0.id() == id }
+        return windowsByID[id]
     }
 
     func windows(forApplicationWithPID applicationPID: pid_t) -> [Window] {
@@ -87,6 +88,9 @@ final class TrackedWindows<Window: WindowType> {
     // MARK: Adding and Removing
 
     func add(window: Window, atFront shouldInsertAtFront: Bool) {
+        let id = window.id()
+        guard windowsByID[id] == nil else { return }
+        windowsByID[id] = window
         if shouldInsertAtFront {
             if let currentFocusedSpace = CGSpacesInfo<Window>.currentFocusedSpace(),
                let firstActiveWindow = activeWindowOnCurrentScreen(atIndex: 0) {
@@ -100,11 +104,13 @@ final class TrackedWindows<Window: WindowType> {
     }
 
     func add(window: Window, afterWindow otherWindow: Window) -> Bool {
-        guard let otherWindowIndex = windows.firstIndex(of: otherWindow) else {
+        let id = window.id()
+        guard windowsByID[id] == nil, let otherWindowIndex = windows.firstIndex(of: otherWindow) else {
             return false
         }
 
         windows.insert(window, at: otherWindowIndex)
+        windowsByID[id] = window
 
         return true
     }
@@ -120,7 +126,7 @@ final class TrackedWindows<Window: WindowType> {
         }
         lastMainWindows = lastMainWindows.filter { $0.value.id() != id }
 
-        guard let windowIndex = windows.firstIndex(where: { $0.id() == window.id() }) else {
+        guard let tracked = windowsByID.removeValue(forKey: id), let windowIndex = windows.firstIndex(of: tracked) else {
             return
         }
 
@@ -136,12 +142,13 @@ final class TrackedWindows<Window: WindowType> {
      stored as this exact element.
      */
     func refreshWindow(_ window: Window) -> Window? {
-        guard let index = windows.firstIndex(where: { $0.id() == window.id() }),
-              windows[index] != window else {
+        let id = window.id()
+        guard let staleWindow = windowsByID[id], staleWindow != window,
+              let index = windows.firstIndex(of: staleWindow) else {
             return nil
         }
 
-        let staleWindow = windows[index]
+        windowsByID[id] = window
         windows[index] = window
         return staleWindow
     }
@@ -155,15 +162,18 @@ final class TrackedWindows<Window: WindowType> {
             }
         }
 
-        guard let windowIndex = windows.firstIndex(of: window) else {
-            windows.append(otherWindow)
+        let id = window.id()
+        let otherID = otherWindow.id()
+        guard let tracked = windowsByID[id], let windowIndex = windows.firstIndex(of: tracked) else {
+            if !isWindowTracked(otherWindow) { add(window: otherWindow, atFront: false) }
             return false
         }
-
-        let otherWindowIndex = windows.firstIndex(of: otherWindow)
+        let otherWindowIndex = windowsByID[otherID].flatMap { windows.firstIndex(of: $0) }
         windows[windowIndex] = otherWindow
+        windowsByID.removeValue(forKey: id)
+        windowsByID[otherID] = otherWindow
 
-        if let otherWindowIndex {
+        if let otherWindowIndex, otherWindowIndex != windowIndex {
             windows.remove(at: otherWindowIndex)
         }
 
@@ -179,7 +189,7 @@ final class TrackedWindows<Window: WindowType> {
         }
 
         if windows.firstIndex(of: window) == nil {
-            windows.append(window)
+            add(window: window, atFront: false)
         }
 
         guard let windowIndex = windows.firstIndex(of: window), let otherWindowIndex = windows.firstIndex(of: otherWindow) else {
@@ -190,8 +200,7 @@ final class TrackedWindows<Window: WindowType> {
             return false
         }
 
-        windows[windowIndex] = otherWindow
-        windows[otherWindowIndex] = window
+        windows.swapAt(windowIndex, otherWindowIndex)
 
         return true
     }
@@ -199,7 +208,12 @@ final class TrackedWindows<Window: WindowType> {
     // MARK: Window States
 
     func isWindowTracked(_ window: Window) -> Bool {
-        return windows.contains(where: { $0.id() == window.id() })
+        return windowsByID[window.id()] != nil
+    }
+
+    func floatingState(forTrackedID id: Window.WindowID) -> Bool? {
+        guard windowsByID[id] != nil else { return nil }
+        return floatingMap[id]?.isFloating ?? false
     }
 
     func isWindowActive(_ window: Window) -> Bool {

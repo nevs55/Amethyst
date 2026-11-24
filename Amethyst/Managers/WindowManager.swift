@@ -376,9 +376,8 @@ extension WindowManager {
         setWindowFloating(!windows.isWindowFloating(focusedWindow), forID: focusedWindow.id())
     }
 
-    func floatingState(forTrackedWindow window: Window) -> Bool? {
-        guard windows.isWindowTracked(window) else { return nil }
-        return windows.isWindowFloating(window)
+    func floatingState(forTrackedID id: Window.WindowID) -> Bool? {
+        return windows.floatingState(forTrackedID: id)
     }
 
     func setWindowExclusion(_ rule: WindowExclusion, enabled: Bool) {

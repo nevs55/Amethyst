@@ -373,6 +373,50 @@ class ScreenManagerTests: QuickSpec {
 }
 
 final class WindowTilingMenuTests: XCTestCase {
+    @MainActor func testSlowWindowLookupLeavesMenuResponsiveAndCannotUpdateAReopenedMenu() async {
+        let lookup = StatusMenuWindowLookup()
+        let reading = expectation(description: "Background AX read started")
+        let resumed = expectation(description: "Reopened menu received its own result")
+        let release = DispatchSemaphore(value: 0)
+        lookup.start(read: {
+            XCTAssertFalse(Thread.isMainThread)
+            reading.fulfill()
+            XCTAssertEqual(release.wait(timeout: .now() + 5), .success)
+            return nil
+        }, show: { _ in XCTFail("Closed menu received a stale result") })
+        await fulfillment(of: [reading], timeout: 2)
+        // Main-thread menu handling can close and reopen before the first app replies.
+        lookup.cancel()
+        lookup.start(read: { nil }, show: { _ in
+            XCTAssertTrue(Thread.isMainThread)
+            resumed.fulfill()
+        })
+        release.signal()
+        await fulfillment(of: [resumed], timeout: 3)
+    }
+
+    func testMenuLooksUpOnlyCurrentlyTrackedWindowIDs() throws {
+        let tracker = TrackedWindows<TestWindow>()
+        let first = try XCTUnwrap(TestWindow(element: nil))
+        let second = try XCTUnwrap(TestWindow(element: nil))
+        let third = try XCTUnwrap(TestWindow(element: nil))
+        tracker.add(window: first, atFront: false)
+        XCTAssertTrue(tracker.add(window: second, afterWindow: first))
+        XCTAssertTrue(tracker.swap(window: third, withWindow: first))
+        XCTAssertEqual(tracker.floatingState(forTrackedID: third.id()), false)
+        _ = tracker.setFloatingOverride(true, forID: second.id())
+        XCTAssertEqual(tracker.floatingState(forTrackedID: second.id()), true)
+        XCTAssertTrue(tracker.replace(window: first, withWindow: third))
+        XCTAssertNil(tracker.floatingState(forTrackedID: first.id()))
+        XCTAssertEqual(tracker.floatingState(forTrackedID: third.id()), false)
+        tracker.remove(window: second, minimized: true)
+        XCTAssertNil(tracker.floatingState(forTrackedID: second.id()))
+        tracker.add(window: second, atFront: false)
+        XCTAssertEqual(tracker.floatingState(forTrackedID: second.id()), true)
+        tracker.remove(window: second)
+        XCTAssertNil(tracker.window(withID: second.id()))
+    }
+
     @MainActor func testSavedWindowMenuPersistsExactAppAndTitleAndCanRemoveItWithoutFocus() throws {
         let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
         XCTAssertTrue(try XCTUnwrap(app.excludedWindowsMenu).supermenu === app.statusItemMenu)

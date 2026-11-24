@@ -162,8 +162,8 @@ final class AXWindowID: Hashable, Codable {
     }
 
     private let window: AXWindow
-    private let pid: pid_t
-    private let windowID: CGWindowID
+    fileprivate let pid: pid_t
+    fileprivate let windowID: CGWindowID
 
     /// Equality for window IDs is based on the underlying CoreGraphics id and the owning pid, which (mostly) uniquely identifies a window.
     static func == (lhs: AXWindowID, rhs: AXWindowID) -> Bool {
@@ -229,16 +229,21 @@ extension AXWindow: WindowType {
         return SIWindow.focused().flatMap { AXWindow(axElement: $0.axElementRef) }
     }
 
+    typealias MenuSelection = (id: AXWindowID, title: String?)
+
     /// Query the front app directly so a per-app window-control grant is sufficient.
-    static func focusedWindow(in application: NSRunningApplication) -> AXWindow? {
-        let element = AXUIElementCreateApplication(application.processIdentifier)
+    static func menuSelection(forPID pid: pid_t) -> MenuSelection? {
+        let element = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(element, 0.25)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &value) == .success,
               let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        let window = AXWindow(axElement: (value as! AXUIElement))
-        guard window.cgID() != kCGNullWindowID, window.pid() == application.processIdentifier else { return nil }
-        return window
+        let windowElement = value as! AXUIElement
+        AXUIElementSetMessagingTimeout(windowElement, 0.25)
+        let window = AXWindow(axElement: windowElement)
+        let id = window.id()
+        guard id.windowID != kCGNullWindowID, id.pid == pid else { return nil }
+        return (id, window.title())
     }
 
     /**
