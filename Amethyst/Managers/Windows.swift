@@ -25,6 +25,20 @@ final class TrackedWindows<Window: WindowType> {
         var overrideOwner: pid_t?
     }
     private var floatingMap: [Window.WindowID: FloatingState] = [:]
+    private struct Pin {
+        let owner: pid_t
+        let frame: CGRect
+        let display: CGRect
+
+        func frame(on bounds: CGRect) -> CGRect {
+            guard bounds != display else { return frame }
+            return CGRect(x: bounds.minX + (frame.minX - display.minX) * bounds.width / display.width,
+                          y: bounds.minY + (frame.minY - display.minY) * bounds.height / display.height,
+                          width: frame.width * bounds.width / display.width,
+                          height: frame.height * bounds.height / display.height).integral
+        }
+    }
+    private var pins: [Window.WindowID: Pin] = [:]
     private let onScreenIDs: () -> Set<CGWindowID>?
     private let spaceForWindow: (Window) -> Int?
 
@@ -121,6 +135,7 @@ final class TrackedWindows<Window: WindowType> {
 
     func remove(window: Window, minimized: Bool = false) {
         let id = window.id()
+        if !minimized { pins.removeValue(forKey: id) }
         if !minimized || floatingMap[id]?.overrideOwner == nil {
             floatingMap.removeValue(forKey: id)
         }
@@ -211,6 +226,22 @@ final class TrackedWindows<Window: WindowType> {
         return windowsByID[window.id()] != nil
     }
 
+    func isPinned(_ id: Window.WindowID) -> Bool { pins[id] != nil }
+
+    func setPinned(_ pinned: Bool, forID id: Window.WindowID) -> Bool {
+        guard let window = windowsByID[id], isPinned(id) != pinned else { return false }
+        if pinned {
+            guard !isWindowFloating(window), let screen = window.screen() else { return false }
+            let bounds = screen.frameIncludingDockAndMenu()
+            let frame = window.frame()
+            guard !bounds.isEmpty, !frame.isEmpty, !frame.isInfinite, bounds.intersects(frame) else { return false }
+            pins[id] = Pin(owner: window.pid(), frame: frame, display: bounds)
+        } else {
+            pins.removeValue(forKey: id)
+        }
+        return true
+    }
+
     func floatingState(forTrackedID id: Window.WindowID) -> Bool? {
         guard windowsByID[id] != nil else { return nil }
         return floatingMap[id]?.isFloating ?? false
@@ -241,6 +272,7 @@ final class TrackedWindows<Window: WindowType> {
         guard state.excludedByRule != excluded else { return false }
         let wasFloating = state.isFloating
         state.excludedByRule = excluded
+        if excluded { pins.removeValue(forKey: id) }
         floatingMap[id] = state
         return wasFloating != state.isFloating
     }
@@ -249,11 +281,13 @@ final class TrackedWindows<Window: WindowType> {
         guard let window = window(withID: id), floatingMap[id]?.excludedByRule != true,
               isWindowFloating(window) != floating else { return nil }
         floatingMap[id] = FloatingState(baseFloating: floating, overrideOwner: window.pid())
+        if floating { pins.removeValue(forKey: id) }
         return window
     }
 
     func clearFloatingOverrides(forPID pid: pid_t) {
         floatingMap = floatingMap.filter { $0.value.overrideOwner != pid }
+        pins = pins.filter { $0.value.owner != pid }
     }
 
     func activateApplication(withPID pid: pid_t) {
@@ -283,8 +317,10 @@ final class TrackedWindows<Window: WindowType> {
     }
 
     func windowSet(forWindows windows: [Window]) -> WindowSet<Window> {
-        let layoutWindows: [LayoutWindow<Window>] = windows.map {
-            LayoutWindow(id: $0.id(), frame: $0.frame(), isFocused: $0.isFocused())
+        let layoutWindows: [LayoutWindow<Window>] = windows.map { window in
+            let id = window.id()
+            let pinnedFrame = pins[id].flatMap { pin in window.screen().map { pin.frame(on: $0.frameIncludingDockAndMenu()) } }
+            return LayoutWindow(id: id, frame: window.frame(), isFocused: window.isFocused(), pinnedFrame: pinnedFrame)
         }
 
         let snapshotFloatingMap = floatingMap

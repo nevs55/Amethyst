@@ -69,6 +69,67 @@ class Layout<Window: WindowType>: Codable {
     }
 }
 
+/// Partitions the remaining display area when normal layout slots intersect a pin.
+enum WindowPinPlacement {
+    private static func area(_ rect: CGRect) -> CGFloat { rect.isEmpty ? 0 : rect.width * rect.height }
+
+    private static func subtract(_ obstacle: CGRect, from rect: CGRect) -> [CGRect] {
+        let cut = rect.intersection(obstacle)
+        guard !cut.isEmpty else { return [rect] }
+        let left = cut.minX - rect.minX
+        let right = rect.maxX - cut.maxX
+        let top = cut.minY - rect.minY
+        let bottom = rect.maxY - cut.maxY
+        // Keep the largest uninterrupted strip in one piece.
+        let vertical = max(left, right) * rect.height >= max(top, bottom) * rect.width
+        let horizontalSpan = vertical ? cut : rect
+        let verticalSpan = vertical ? rect : cut
+        return [
+            CGRect(x: rect.minX, y: verticalSpan.minY, width: left, height: verticalSpan.height),
+            CGRect(x: cut.maxX, y: verticalSpan.minY, width: right, height: verticalSpan.height),
+            CGRect(x: horizontalSpan.minX, y: rect.minY, width: horizontalSpan.width, height: top),
+            CGRect(x: horizontalSpan.minX, y: cut.maxY, width: horizontalSpan.width, height: bottom)
+        ].filter { !$0.isEmpty }
+    }
+
+    static func tiles(in bounds: CGRect, avoiding obstacles: [CGRect], preferred: [CGRect]) -> [CGRect] {
+        let regions = obstacles.reduce([bounds]) { regions, pin in regions.flatMap { subtract(pin, from: $0) } }
+        // A full-display pin leaves no free area. Keep other windows accessible in their normal slots.
+        guard !regions.isEmpty, let first = preferred.first else { return preferred }
+        if preferred.allSatisfy({ $0 == first }), let largest = regions.max(by: { area($0) < area($1) }) {
+            return Array(repeating: largest, count: preferred.count)
+        }
+        var counts = Array(repeating: 0, count: regions.count)
+        for _ in preferred {
+            guard let index = regions.indices.max(by: {
+                area(regions[$0]) / CGFloat(counts[$0] + 1) < area(regions[$1]) / CGFloat(counts[$1] + 1)
+            }) else { break }
+            counts[index] += 1
+        }
+        var remaining = Array(preferred.indices)
+        var result = preferred
+        for (index, region) in regions.enumerated() where counts[index] > 0 {
+            let ordered = remaining.sorted {
+                let lhs = area(preferred[$0].intersection(region))
+                let rhs = area(preferred[$1].intersection(region))
+                return lhs == rhs ? $0 < $1 : lhs > rhs
+            }
+            let group = Array(ordered.prefix(counts[index]))
+            remaining = Array(ordered.dropFirst(group.count))
+            // Preserve the layout's relative sizes and ordering within this free region.
+            let envelope = group.reduce(CGRect.null) { $0.union(preferred[$1]) }
+            guard !envelope.isEmpty else { continue }
+            for member in group {
+                let tile = preferred[member]
+                func x(_ value: CGFloat) -> CGFloat { region.minX + ((value - envelope.minX) * region.width / envelope.width).rounded() }
+                func y(_ value: CGFloat) -> CGFloat { region.minY + ((value - envelope.minY) * region.height / envelope.height).rounded() }
+                result[member] = CGRect(x: x(tile.minX), y: y(tile.minY), width: x(tile.maxX) - x(tile.minX), height: y(tile.maxY) - y(tile.minY))
+            }
+        }
+        return result
+    }
+}
+
 /// Errors occurring when decoding a layout
 enum LayoutDecodingError: Error {
     /**
@@ -82,6 +143,33 @@ enum LayoutDecodingError: Error {
 // MARK: Window Querying
 
 extension Layout {
+    /// Resolve reservations here so reflow, mouse hit testing and resize gestures see the same tiles.
+    func resolvedAssignments(_ windowSet: WindowSet<Window>, on screen: Screen) -> [FrameAssignmentOperation<Window>]? {
+        let original = frameAssignments(windowSet, on: screen)
+        let pinned = windowSet.windows.filter { $0.pinnedFrame != nil }
+        guard !pinned.isEmpty else { return original }
+        let bounds = screen.adjustedFrame()
+        let pinnedAssignments = pinned.compactMap { window -> FrameAssignmentOperation<Window>? in
+            guard let frame = window.pinnedFrame else { return nil }
+            let rules = ResizeRules(isMain: false, unconstrainedDimension: .horizontal, scaleFactor: 1)
+            let assignment = FrameAssignment(frame: frame, window: window, screenFrame: bounds, resizeRules: rules, disableWindowMargins: true)
+            return FrameAssignmentOperation(frameAssignment: assignment, windowSet: windowSet)
+        }
+        let others = (original ?? []).filter { $0.frameAssignment.window.pinnedFrame == nil }
+        let obstacles = pinned.compactMap(\.pinnedFrame)
+        guard others.contains(where: { operation in
+            obstacles.contains { !operation.frameAssignment.finalFrame.intersection($0).isEmpty }
+        }) else { return pinnedAssignments + others }
+
+        let tiles = WindowPinPlacement.tiles(in: bounds, avoiding: obstacles, preferred: others.map { $0.frameAssignment.frame })
+        let adjusted = zip(others, tiles).map { operation, tile in
+            let old = operation.frameAssignment
+            let assignment = FrameAssignment(frame: tile, window: old.window, screenFrame: tile,
+                                             resizeRules: old.resizeRules, disableWindowMargins: old.disableWindowMargins)
+            return FrameAssignmentOperation(frameAssignment: assignment, windowSet: windowSet)
+        }
+        return pinnedAssignments + adjusted
+    }
     /**
      Determines what window the layout would put at a given point.
      
@@ -96,7 +184,7 @@ extension Layout {
      - Note: This does not necessarily correspond to the final position of the window as windows do not necessarily take the exact frame the layout provides.
      */
     func windowAtPoint(_ point: CGPoint, of windowSet: WindowSet<Window>, on screen: Screen) -> LayoutWindow<Window>? {
-        return frameAssignments(windowSet, on: screen)?
+        return resolvedAssignments(windowSet, on: screen)?
             .map { $0.frameAssignment }
             .first { $0.frame.contains(point) }?
             .window
@@ -116,7 +204,7 @@ extension Layout {
      - Note: This does not necessarily correspond to the final frame of the window as windows do not necessarily take the exact frame the layout provides.
      */
     func assignedFrame(_ window: Window, of windowSet: WindowSet<Window>, on screen: Screen) -> FrameAssignment<Window>? {
-        guard let assignments = frameAssignments(windowSet, on: screen) else {
+        guard let assignments = resolvedAssignments(windowSet, on: screen) else {
             return nil
         }
 

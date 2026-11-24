@@ -380,6 +380,12 @@ extension WindowManager {
         return windows.floatingState(forTrackedID: id)
     }
 
+    func isWindowPinned(_ id: Window.WindowID) -> Bool { windows.isPinned(id) }
+
+    func setWindowPinned(_ pinned: Bool, forID id: Window.WindowID) {
+        if windows.setPinned(pinned, forID: id) { markAllScreensForReflow() }
+    }
+
     func setWindowExclusion(_ rule: WindowExclusion, enabled: Bool) {
         userConfiguration.setWindowExclusion(rule, enabled: enabled)
         for (pid, application) in applications where NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == rule.bundleIdentifier {
@@ -965,6 +971,7 @@ extension WindowManager: ApplicationObservationDelegate {
     }
 
     func application(_ application: AnyApplication<Application>, didMoveWindow window: Window) {
+        guard !windows.isPinned(window.id()) else { return }
         guard userConfiguration.mouseSwapsWindows() else {
             return
         }
@@ -995,6 +1002,7 @@ extension WindowManager: ApplicationObservationDelegate {
     }
 
     func application(_ application: AnyApplication<Application>, didResizeWindow window: Window) {
+        guard !windows.isPinned(window.id()) else { return }
         guard userConfiguration.mouseResizesWindows() else {
             return
         }
@@ -1205,7 +1213,11 @@ extension WindowManager: ScreenManagerDelegate {
         let windows = screenManager.currentLayout is FloatingLayout
             ? self.windows(onScreen: screen).filter { $0.shouldBeManaged() }
             : activeWindows(on: screen)
-        windows[range(windows.count)].forEach {
+        let eligible = windows.filter { !self.windows.isPinned($0.id()) }
+        let pinnedCount = windows.count - eligible.count
+        let excess = min(range(windows.count).count, eligible.count)
+        let candidates = pinnedCount == 0 ? windows[range(windows.count)] : eligible.suffix(excess)
+        candidates.forEach {
             $0.minimize()
         }
     }

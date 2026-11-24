@@ -66,6 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @IBOutlet var startAtLoginMenuItem: NSMenuItem?
     @IBOutlet var toggleGlobalTilingMenuItem: NSMenuItem?
     @IBOutlet var windowTilingMenuItem: NSMenuItem?
+    @IBOutlet var windowPinMenuItem: NSMenuItem?
     @IBOutlet var excludedWindowsMenu: NSMenu?
     @IBOutlet var layoutsMenuItem: NSMenuItem?
 
@@ -216,12 +217,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             selectedMenuRule = WindowExclusion(bundleIdentifier: application.bundleIdentifier, title: selection.title)
             let title = selection.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let name = title.isEmpty ? (application.localizedName ?? "Selected Window") : title
+            let pinned = manager.isWindowPinned(id)
+            configurePinMenuItem(windowName: name, pinned: pinned, enabled: !floating) { [weak manager] in
+                manager?.setWindowPinned(!pinned, forID: id)
+            }
             configureWindowTilingMenuItem(windowName: name, floating: floating) { [weak manager] in
                 manager?.setWindowFloating(!floating, forID: id)
             }
         } else {
             selectedMenuRule = nil
             configureWindowTilingMenuItem()
+            configurePinMenuItem()
         }
         windowTilingMenuItem?.isHidden = selectedMenuRule.map {
             UserConfiguration.shared.excludesWindow(in: $0.bundleIdentifier, title: $0.title)
@@ -256,6 +262,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private static func menuWindowName(_ title: String) -> String {
         let line = title.components(separatedBy: .newlines).joined(separator: " ")
         return line.count > 48 ? String(line.prefix(47)) + "…" : line
+    }
+
+    func configurePinMenuItem(windowName: String? = nil, pinned: Bool = false, enabled: Bool = false, perform: (() -> Void)? = nil) {
+        guard let item = windowPinMenuItem else { return }
+        item.title = windowName.map { pinned ? "Unpin “\(Self.menuWindowName($0))”" : "Pin “\(Self.menuWindowName($0))” Here" } ?? "Pin Selected Window Here"
+        item.target = self
+        item.representedObject = enabled ? perform : nil
+        item.action = enabled ? #selector(applyWindowTilingChoice(_:)) : nil
+        item.isEnabled = enabled
     }
 
     private func configureSaveExclusionItem(_ item: NSMenuItem, selected: WindowExclusion?, rules: [WindowExclusion],
@@ -482,6 +497,7 @@ extension AppDelegate: NSMenuDelegate {
             if !menuSelectionResolved {
                 windowTilingMenuItem?.isHidden = false
                 configureWindowTilingMenuItem()
+                configurePinMenuItem()
             }
             permissionMenuItem.representedObject = target
             if let name = target?.localizedName {

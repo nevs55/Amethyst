@@ -316,7 +316,7 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
             return
         }
 
-        guard let layout = currentLayout, let frameAssignments = layout.frameAssignments(windows, on: screen) else {
+        guard let layout = currentLayout, let frameAssignments = layout.resolvedAssignments(windows, on: screen) else {
             tiledWindowIDs.removeAll()
             return
         }

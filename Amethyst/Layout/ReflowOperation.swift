@@ -61,6 +61,7 @@ struct LayoutWindow<Window: WindowType>: Equatable {
     let id: Window.WindowID
     let frame: CGRect
     let isFocused: Bool
+    var pinnedFrame: CGRect? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         return lhs.id == rhs.id
@@ -164,6 +165,7 @@ struct FrameAssignment<Window: WindowType> {
 
     /// The final frame is the desired frame, but transformed to provide desired padding
     var finalFrame: CGRect {
+        if let pinnedFrame = window.pinnedFrame { return pinnedFrame }
         var ret = frame
         let padding = floor(UserConfiguration.shared.windowMarginSize() / 2)
 
@@ -210,6 +212,12 @@ struct FrameAssignment<Window: WindowType> {
 
     /// Perform the actual application of the frame to the window
     func perform(withWindow window: Window) {
+        if let pinnedFrame = self.window.pinnedFrame {
+            DispatchQueue.main.sync {
+                window.setFrame(pinnedFrame, withThreshold: CGSize(width: 1, height: 1))
+            }
+            return
+        }
         var finalFrame = self.finalFrame
         var finalOrigin = finalFrame.origin
 

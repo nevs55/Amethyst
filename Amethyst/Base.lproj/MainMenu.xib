@@ -26,6 +26,9 @@
                         <action selector="toggleGlobalTiling:" target="494" id="3aM-9U-hWx"/>
                     </connections>
                 </menuItem>
+                <menuItem title="Pin Selected Window Here" enabled="NO" id="window-pin-item">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                </menuItem>
                 <menuItem title="Excluded Windows" id="excluded-windows-item">
                     <modifierMask key="keyEquivalentModifierMask"/>
                     <menu key="submenu" title="Excluded Windows" id="excluded-windows-submenu"/>
@@ -86,6 +89,7 @@
                 <outlet property="statusItemMenu" destination="536" id="547"/>
                 <outlet property="toggleGlobalTilingMenuItem" destination="rjJ-w4-5Ht" id="4Dq-e8-R1M"/>
                 <outlet property="windowTilingMenuItem" destination="window-tiling-item" id="window-tiling-outlet"/>
+                <outlet property="windowPinMenuItem" destination="window-pin-item" id="window-pin-outlet"/>
                 <outlet property="excludedWindowsMenu" destination="excluded-windows-submenu" id="excluded-windows-outlet"/>
                 <outlet property="versionMenuItem" destination="bNZ-Ry-Q4Q" id="jXC-pY-N2a"/>
                 <outlet property="layoutsMenuItem" destination="layouts-menu-item" id="layouts-menu-outlet"/>

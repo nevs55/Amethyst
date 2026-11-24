@@ -562,6 +562,84 @@ final class WindowTilingMenuTests: XCTestCase {
     }
 }
 
+final class WindowPinTests: XCTestCase {
+    func testPinKeepsItsCapturedFrameAcrossCloseAndLayoutChange() throws {
+        let bounds = CGRect(x: -1200, y: 30, width: 1200, height: 900)
+        let screen = TestScreen(frame: bounds)
+        let tracker = TrackedWindows<TestWindow>()
+        let windows = try (0..<4).map { _ -> TestWindow in
+            let window = try XCTUnwrap(TestWindow(element: nil))
+            window.testScreen = screen
+            tracker.add(window: window, atFront: false)
+            return window
+        }
+        let pinned = windows[0]
+        let left = CGRect(x: -1200, y: 30, width: 600, height: 900)
+        pinned.setFrame(left, withThreshold: .zero)
+        XCTAssertTrue(tracker.setPinned(true, forID: pinned.id()))
+        tracker.remove(window: windows[1])
+        // A reflow restores the captured rectangle even if the app moved itself.
+        pinned.setFrame(bounds, withThreshold: .zero)
+        let set = tracker.windowSet(forWindows: tracker.windows)
+        let tall = try XCTUnwrap(TallLayout<TestWindow>().resolvedAssignments(set, on: screen))
+        XCTAssertEqual(tall.map { $0.frameAssignment.frame }, [
+            left, CGRect(x: -600, y: 30, width: 600, height: 450), CGRect(x: -600, y: 480, width: 600, height: 450)
+        ])
+        let wide = try XCTUnwrap(WideLayout<TestWindow>().resolvedAssignments(set, on: screen))
+        XCTAssertEqual(wide.count, 3)
+        XCTAssertEqual(wide.first?.frameAssignment.finalFrame, left)
+        for operation in wide.dropFirst() {
+            XCTAssertTrue(left.intersection(operation.frameAssignment.frame).isEmpty)
+            XCTAssertTrue(bounds.contains(operation.frameAssignment.frame))
+        }
+        tracker.remove(window: pinned, minimized: true)
+        tracker.add(window: pinned, atFront: false)
+        XCTAssertTrue(tracker.isPinned(pinned.id()))
+        XCTAssertTrue(tracker.setPinned(false, forID: pinned.id()))
+        let unpinned = tracker.windowSet(forWindows: tracker.windows)
+        let normal = try XCTUnwrap(WideLayout<TestWindow>().frameAssignments(unpinned, on: screen))
+        XCTAssertEqual(WideLayout<TestWindow>().resolvedAssignments(unpinned, on: screen)?.map { $0.frameAssignment.frame },
+                       normal.map { $0.frameAssignment.frame })
+        XCTAssertTrue(tracker.setPinned(true, forID: pinned.id()))
+        tracker.remove(window: pinned)
+        XCTAssertFalse(tracker.isPinned(pinned.id()))
+    }
+
+    func testMultiplePinsReserveOnlyTheirVisibleArea() {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let left = CGRect(x: 0, y: 0, width: 300, height: 800)
+        let corner = CGRect(x: 800, y: 0, width: 200, height: 400)
+        let desired = (0..<4).map { CGRect(x: $0 * 250, y: 0, width: 250, height: 800) }
+        let tiles = WindowPinPlacement.tiles(in: bounds, avoiding: [left, corner], preferred: desired)
+        XCTAssertEqual(tiles.count, desired.count)
+        for (index, tile) in tiles.enumerated() {
+            XCTAssertFalse(tile.isEmpty)
+            XCTAssertTrue(bounds.contains(tile))
+            XCTAssertTrue(tile.intersection(left).isEmpty)
+            XCTAssertTrue(tile.intersection(corner).isEmpty)
+            XCTAssertTrue(tiles.prefix(index).allSatisfy { $0.intersection(tile).isEmpty })
+        }
+        XCTAssertEqual(WindowPinPlacement.tiles(in: bounds, avoiding: [bounds], preferred: desired), desired)
+    }
+
+    @MainActor func testPinMenuActionAndUnavailableSelection() throws {
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let item = try XCTUnwrap(app.windowPinMenuItem)
+        defer { app.configurePinMenuItem() }
+        var clicked = false
+        app.configurePinMenuItem(windowName: "Discord", enabled: true) { clicked = true }
+        XCTAssertEqual(item.title, "Pin “Discord” Here")
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        XCTAssertTrue(clicked)
+        app.configurePinMenuItem(windowName: "Discord", pinned: true, enabled: true) {}
+        XCTAssertEqual(item.title, "Unpin “Discord”")
+        app.configurePinMenuItem()
+        XCTAssertFalse(item.isEnabled)
+        XCTAssertNil(item.action)
+        XCTAssertNil(item.representedObject)
+    }
+}
+
 final class StatusLayoutsMenuTests: XCTestCase {
     func testEqualTileLayoutsCoverOffsetDisplayAfterEachWindowCloses() throws {
         let bounds = CGRect(x: -900, y: 45, width: 901, height: 603)
