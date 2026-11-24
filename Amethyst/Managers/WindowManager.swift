@@ -382,8 +382,16 @@ extension WindowManager {
 
     func isWindowPinned(_ id: Window.WindowID) -> Bool { windows.isPinned(id) }
 
+    func canPinWindow(_ id: Window.WindowID) -> Bool { windows.canPin(id) }
+
     func setWindowPinned(_ pinned: Bool, forID id: Window.WindowID) {
-        if windows.setPinned(pinned, forID: id) { markAllScreensForReflow() }
+        guard let window = windows.window(withID: id) else { return }
+        let wasFloating = windows.isWindowFloating(window)
+        guard windows.setPinned(pinned, forID: id) else { return }
+        if wasFloating != windows.isWindowFloating(window), let screen = window.screen() {
+            distributeEventToScreen(screen, change: wasFloating ? .add(window: window) : .remove(window: window))
+        }
+        markAllScreensForReflow()
     }
 
     func setWindowExclusion(_ rule: WindowExclusion, enabled: Bool) {
@@ -904,6 +912,10 @@ extension WindowManager: MouseStateKeeperDelegate {
     }
 
     func swapDraggedWindowWithDropzone(_ draggedWindow: Window) {
+        if windows.isPinned(draggedWindow.id()) {
+            markAllScreensForReflow()
+            return
+        }
         guard let screen = draggedWindow.screen() else { return }
 
         let windows = activeWindows(on: screen)
@@ -970,8 +982,23 @@ extension WindowManager: ApplicationObservationDelegate {
         swapInTab(window: window)
     }
 
+    /// Restore a dragged pin on mouse-up. AX events from our own reflow must not schedule another reflow.
+    private func handlePinnedDrag(_ window: Window) -> Bool {
+        guard windows.isPinned(window.id()) else { return false }
+        switch mouseStateKeeper.state {
+        case .dragging:
+            mouseStateKeeper.state = .moving(window: window)
+        case let .doneDragging(atTime) where Date().timeIntervalSince(atTime) < mouseStateKeeper.dragRaceThresholdSeconds:
+            mouseStateKeeper.state = .pointing
+            markAllScreensForReflow()
+        default:
+            break
+        }
+        return true
+    }
+
     func application(_ application: AnyApplication<Application>, didMoveWindow window: Window) {
-        guard !windows.isPinned(window.id()) else { return }
+        guard !handlePinnedDrag(window) else { return }
         guard userConfiguration.mouseSwapsWindows() else {
             return
         }
@@ -1002,7 +1029,7 @@ extension WindowManager: ApplicationObservationDelegate {
     }
 
     func application(_ application: AnyApplication<Application>, didResizeWindow window: Window) {
-        guard !windows.isPinned(window.id()) else { return }
+        guard !handlePinnedDrag(window) else { return }
         guard userConfiguration.mouseResizesWindows() else {
             return
         }
@@ -1087,7 +1114,8 @@ extension WindowManager: WindowTransitionTarget {
     func executeTransition(_ transition: WindowTransition<Window>) {
         switch transition {
         case let .switchWindows(window, otherWindow):
-            guard windows.swap(window: window, withWindow: otherWindow) else {
+            guard !windows.isPinned(window.id()), !windows.isPinned(otherWindow.id()),
+                  windows.swap(window: window, withWindow: otherWindow) else {
                 return
             }
 

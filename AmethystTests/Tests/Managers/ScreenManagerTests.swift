@@ -622,6 +622,27 @@ final class WindowPinTests: XCTestCase {
         XCTAssertEqual(WindowPinPlacement.tiles(in: bounds, avoiding: [bounds], preferred: desired), desired)
     }
 
+    func testManuallyPositionedWindowReturnsToFloatingWhenUnpinned() throws {
+        let screen = TestScreen(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        let tracker = TrackedWindows<TestWindow>()
+        let window = try XCTUnwrap(TestWindow(element: nil))
+        window.testScreen = screen
+        window.setFrame(CGRect(x: 60, y: 80, width: 300, height: 150), withThreshold: .zero)
+        tracker.add(window: window, atFront: false)
+        let id = window.id()
+        XCTAssertNotNil(tracker.setFloatingOverride(true, forID: id))
+        XCTAssertTrue(tracker.setPinned(true, forID: id))
+        XCTAssertFalse(tracker.isWindowFloating(window))
+        let set = tracker.windowSet(forWindows: [window])
+        XCTAssertFalse(set.isWindowFloating(try XCTUnwrap(set.windows.first)))
+        XCTAssertTrue(tracker.setPinned(false, forID: id))
+        XCTAssertTrue(tracker.isWindowFloating(window))
+        XCTAssertTrue(tracker.setPinned(true, forID: id))
+        XCTAssertTrue(tracker.applySavedExclusion(true, to: window))
+        XCTAssertFalse(tracker.canPin(id))
+        XCTAssertFalse(tracker.isPinned(id))
+    }
+
     @MainActor func testPinMenuActionAndUnavailableSelection() throws {
         let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
         let item = try XCTUnwrap(app.windowPinMenuItem)

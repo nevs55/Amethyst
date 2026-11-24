@@ -218,7 +218,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let title = selection.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let name = title.isEmpty ? (application.localizedName ?? "Selected Window") : title
             let pinned = manager.isWindowPinned(id)
-            configurePinMenuItem(windowName: name, pinned: pinned, enabled: !floating) { [weak manager] in
+            configurePinMenuItem(windowName: name, pinned: pinned, enabled: manager.canPinWindow(id)) { [weak manager] in
                 manager?.setWindowPinned(!pinned, forID: id)
             }
             configureWindowTilingMenuItem(windowName: name, floating: floating) { [weak manager] in

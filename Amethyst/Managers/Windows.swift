@@ -228,10 +228,14 @@ final class TrackedWindows<Window: WindowType> {
 
     func isPinned(_ id: Window.WindowID) -> Bool { pins[id] != nil }
 
+    func canPin(_ id: Window.WindowID) -> Bool {
+        windowsByID[id] != nil && floatingMap[id]?.excludedByRule != true
+    }
+
     func setPinned(_ pinned: Bool, forID id: Window.WindowID) -> Bool {
         guard let window = windowsByID[id], isPinned(id) != pinned else { return false }
         if pinned {
-            guard !isWindowFloating(window), let screen = window.screen() else { return false }
+            guard canPin(id), let screen = window.screen() else { return false }
             let bounds = screen.frameIncludingDockAndMenu()
             let frame = window.frame()
             guard !bounds.isEmpty, !frame.isEmpty, !frame.isInfinite, bounds.intersects(frame) else { return false }
@@ -244,7 +248,7 @@ final class TrackedWindows<Window: WindowType> {
 
     func floatingState(forTrackedID id: Window.WindowID) -> Bool? {
         guard windowsByID[id] != nil else { return nil }
-        return floatingMap[id]?.isFloating ?? false
+        return !isPinned(id) && (floatingMap[id]?.isFloating ?? false)
     }
 
     func isWindowActive(_ window: Window) -> Bool {
@@ -256,7 +260,8 @@ final class TrackedWindows<Window: WindowType> {
     }
 
     func isWindowFloating(_ window: Window) -> Bool {
-        return floatingMap[window.id()]?.isFloating ?? false
+        let id = window.id()
+        return !isPinned(id) && (floatingMap[id]?.isFloating ?? false)
     }
 
     func setFloating(_ floating: Bool, forWindow window: Window) {
@@ -270,11 +275,11 @@ final class TrackedWindows<Window: WindowType> {
         let id = window.id()
         var state = floatingMap[id] ?? FloatingState()
         guard state.excludedByRule != excluded else { return false }
-        let wasFloating = state.isFloating
+        let wasFloating = isWindowFloating(window)
         state.excludedByRule = excluded
         if excluded { pins.removeValue(forKey: id) }
         floatingMap[id] = state
-        return wasFloating != state.isFloating
+        return wasFloating != isWindowFloating(window)
     }
 
     func setFloatingOverride(_ floating: Bool, forID id: Window.WindowID) -> Window? {
@@ -324,6 +329,7 @@ final class TrackedWindows<Window: WindowType> {
         }
 
         let snapshotFloatingMap = floatingMap
+        let snapshotPins = pins
         let snapshotActiveIDCache = activeIDCache
         let snapshotWindowsByID = Dictionary(uniqueKeysWithValues: windows.map { ($0.id(), $0) })
 
@@ -336,7 +342,7 @@ final class TrackedWindows<Window: WindowType> {
                 return window.isActive() && snapshotActiveIDCache.contains(window.cgID())
             },
             isWindowWithIDFloating: { windowID -> Bool in
-                return snapshotFloatingMap[windowID]?.isFloating ?? false
+                return snapshotPins[windowID] == nil && (snapshotFloatingMap[windowID]?.isFloating ?? false)
             },
             windowForID: { windowID -> Window? in
                 return snapshotWindowsByID[windowID]
