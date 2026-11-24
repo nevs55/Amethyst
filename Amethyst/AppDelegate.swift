@@ -385,7 +385,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             menuItem.isEnabled = ready
             menuItem.state = layoutInfo.isSelected ? .on : .off
 
-            submenu.addItem(menuItem)
+            LayoutType<AXWindow>.addMenuItem(menuItem, forKey: layoutInfo.key, to: submenu)
         }
 
         submenu.addItem(.separator())

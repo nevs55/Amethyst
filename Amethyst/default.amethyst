@@ -3,7 +3,10 @@
         "tall",
         "wide",
         "fullscreen",
-        "column"
+        "column",
+        "builtin-grid",
+        "builtin-equal-columns",
+        "builtin-equal-rows"
     ],
     "mod1": [
         "option",

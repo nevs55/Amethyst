@@ -40,7 +40,7 @@ class LayoutsPreferencesViewController: NSViewController, NSTableViewDataSource,
             menuItem.target = self
             menuItem.action = #selector(addLayoutString(_:))
 
-            layoutMenu.addItem(menuItem)
+            LayoutType<AXWindow>.addMenuItem(menuItem, forKey: layoutKey, to: layoutMenu)
         }
 
         let frame = sender.frame

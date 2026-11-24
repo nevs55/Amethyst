@@ -6,7 +6,7 @@
 //  Copyright © 2016 Ian Ynda-Hummel. All rights reserved.
 //
 
-import Foundation
+import AppKit
 
 extension FileManager {
     func layoutsDirectory() throws -> URL {
@@ -42,6 +42,7 @@ enum LayoutType<Window: WindowType> {
         case unknownLayout
     }
 
+    case grid, equalColumns, equalRows
     case tall
     case tallRight
     case wide
@@ -80,12 +81,47 @@ enum LayoutType<Window: WindowType> {
             .floating,
             .widescreenTallLeft,
             .widescreenTallRight,
-            .binarySpacePartitioning
+            .binarySpacePartitioning,
+            .grid, .equalColumns, .equalRows
         ]
+    }
+
+    private var menuGroup: String {
+        switch self {
+        case .tall, .tallRight, .wide, .twoPane, .twoPaneRight, .widescreenTallLeft, .widescreenTallRight:
+            return "Main Pane"
+        case .threeColumnLeft, .threeColumnMiddle, .threeColumnRight, .fourColumnLeft, .fourColumnRight, .column, .row:
+            return "Columns and Rows"
+        case .grid, .equalColumns, .equalRows:
+            return "Equal Tiles"
+        case .binarySpacePartitioning:
+            return "Partitioning"
+        case .fullscreen, .floating:
+            return "Fullscreen and Floating"
+        case .custom:
+            return "Custom"
+        }
+    }
+
+    @MainActor static func addMenuItem(_ item: NSMenuItem, forKey key: String, to menu: NSMenu) {
+        let name = from(key: key).menuGroup
+        let group: NSMenu
+        if let existing = menu.item(withTitle: name)?.submenu {
+            group = existing
+        } else {
+            group = NSMenu(title: name)
+            let parent = menu.addItem(withTitle: name, action: nil, keyEquivalent: "")
+            parent.submenu = group
+        }
+        group.addItem(item)
+        if item.state == .on { menu.item(withTitle: name)?.state = .on }
     }
 
     var key: String {
         switch self {
+        case .grid: return GridLayout<Window>.layoutKey
+        case .equalColumns: return EqualColumnsLayout<Window>.layoutKey
+        case .equalRows: return EqualRowsLayout<Window>.layoutKey
         case .tall:
             return "tall"
         case .tallRight:
@@ -127,6 +163,9 @@ enum LayoutType<Window: WindowType> {
 
     var layoutClass: Layout<Window>.Type {
         switch self {
+        case .grid: return GridLayout<Window>.self
+        case .equalColumns: return EqualColumnsLayout<Window>.self
+        case .equalRows: return EqualRowsLayout<Window>.self
         case .tall:
             return TallLayout<Window>.self
         case .tallRight:
@@ -168,6 +207,9 @@ enum LayoutType<Window: WindowType> {
 
     static func from(key: String) -> LayoutType<Window> {
         switch key {
+        case GridLayout<Window>.layoutKey: return .grid
+        case EqualColumnsLayout<Window>.layoutKey: return .equalColumns
+        case EqualRowsLayout<Window>.layoutKey: return .equalRows
         case "tall":
             return .tall
         case "tall-right":

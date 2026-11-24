@@ -563,6 +563,29 @@ final class WindowTilingMenuTests: XCTestCase {
 }
 
 final class StatusLayoutsMenuTests: XCTestCase {
+    func testEqualTileLayoutsCoverOffsetDisplayAfterEachWindowCloses() throws {
+        let bounds = CGRect(x: -900, y: 45, width: 901, height: 603)
+        let screen = TestScreen(frame: bounds)
+        let windows = try (0..<7).map { _ in try XCTUnwrap(TestWindow(element: nil)) }
+        for key in ["builtin-grid", "builtin-equal-columns", "builtin-equal-rows"] {
+            let layout = try XCTUnwrap(LayoutType<TestWindow>.layoutForKey(key))
+            for count in 0...windows.count {
+                let set = TrackedWindows<TestWindow>().windowSet(forWindows: Array(windows.prefix(count)))
+                let frames = try XCTUnwrap(layout.frameAssignments(set, on: screen)).map { $0.frameAssignment.frame }
+                XCTAssertEqual(frames.count, count)
+                guard count > 0 else { continue }
+                XCTAssertEqual(frames.reduce(CGRect.null) { $0.union($1) }, bounds)
+                XCTAssertEqual(frames.reduce(CGFloat.zero) { $0 + $1.width * $1.height }, bounds.width * bounds.height)
+                for (index, frame) in frames.enumerated() {
+                    XCTAssertFalse(frames.prefix(index).contains { $0.intersection(frame).width * $0.intersection(frame).height > 0 })
+                }
+                if key == "builtin-equal-columns" { XCTAssertTrue(frames.allSatisfy { $0.height == bounds.height }) }
+                if key == "builtin-equal-rows" { XCTAssertTrue(frames.allSatisfy { $0.width == bounds.width }) }
+                if key == "builtin-grid", count == 4 { XCTAssertEqual(Set(frames.map(\.minY)).count, 2) }
+            }
+        }
+    }
+
     @MainActor func testLayoutsCanBeSelectedWithoutProcessWideTrust() throws {
         let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
         let windowManager = try XCTUnwrap(app.windowManager)
@@ -580,7 +603,7 @@ final class StatusLayoutsMenuTests: XCTestCase {
         manager.updateSpace(to: Space(id: 1, type: CGSSpaceTypeUser, uuid: "menu-test"))
         let menu = NSMenu()
         app.updateLayoutsMenu(menu, for: manager)
-        let wide = try XCTUnwrap(menu.item(withTitle: "Wide"))
+        let wide = try XCTUnwrap(menu.item(withTitle: "Main Pane")?.submenu?.item(withTitle: "Wide"))
         XCTAssertTrue(wide.isEnabled)
         XCTAssertNotNil(wide.action)
         app.selectLayout(wide)
@@ -615,13 +638,13 @@ final class StatusLayoutsMenuTests: XCTestCase {
         config.setLayoutKeys(["wide", "tall", "wide"])
         root.delegate?.menuNeedsUpdate?(root)
         submenu.delegate?.menuNeedsUpdate?(submenu)
-        let choices = submenu.items.prefix { !$0.isSeparatorItem }
+        let choices = try XCTUnwrap(submenu.item(withTitle: "Main Pane")?.submenu).items
         XCTAssertEqual(choices.map(\.title), ["Wide", "Tall", "Wide"])
         XCTAssertEqual(choices.map(\.tag), [0, 1, 2])
 
         config.setLayoutKeys(["column"])
         submenu.delegate?.menuNeedsUpdate?(submenu)
-        XCTAssertEqual(submenu.items.prefix { !$0.isSeparatorItem }.map { $0.identifier?.rawValue }, ["column"])
+        XCTAssertEqual(submenu.item(withTitle: "Columns and Rows")?.submenu?.items.map { $0.identifier?.rawValue }, ["column"])
     }
 
     @MainActor func testConfiguredChoicesAreVisibleBeforeWindowManagementStarts() {
@@ -635,7 +658,7 @@ final class StatusLayoutsMenuTests: XCTestCase {
         defer { config.setLayoutKeys(original) }
         config.setLayoutKeys(["tall", "wide"])
         app.menuNeedsUpdate(submenu)
-        let choices = submenu.items.filter { $0.identifier != nil }
+        let choices = submenu.item(withTitle: "Main Pane")?.submenu?.items ?? []
         XCTAssertEqual(choices.map(\.title), ["Tall", "Wide"])
         XCTAssertTrue(choices.allSatisfy { !$0.isEnabled && $0.action == nil })
         XCTAssertTrue(submenu.items.last?.title.hasPrefix("Waiting for") == true)
