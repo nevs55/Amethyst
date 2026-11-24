@@ -103,7 +103,7 @@ enum LayoutType<Window: WindowType> {
         }
     }
 
-    @MainActor static func addMenuItem(_ item: NSMenuItem, forKey key: String, to menu: NSMenu) {
+    static func addMenuItem(_ item: NSMenuItem, forKey key: String, to menu: NSMenu) {
         let name = from(key: key).menuGroup
         let group: NSMenu
         if let existing = menu.item(withTitle: name)?.submenu {
