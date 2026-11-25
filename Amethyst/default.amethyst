@@ -6,7 +6,10 @@
         "column",
         "builtin-grid",
         "builtin-equal-columns",
-        "builtin-equal-rows"
+        "builtin-equal-rows",
+        "builtin-main-left-grid",
+        "builtin-top-pair",
+        "builtin-main-below"
     ],
     "mod1": [
         "option",

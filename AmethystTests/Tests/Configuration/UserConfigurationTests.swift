@@ -580,6 +580,27 @@ class UserConfigurationTests: QuickSpec {
         }
 
         describe("load configuration") {
+            it("appends missing desktop presets once and respects subsequent removals") {
+                let configuration = UserConfiguration(storage: TestConfigurationStorage())
+                let desktop = LayoutType<TestWindow>.desktopLayouts.map(\.key)
+                let existing = ["wide", desktop[1], "wide"]
+                configuration.defaultConfiguration = JSON(["layouts": ["tall"] + desktop])
+                configuration.setLayoutKeys(existing)
+                configuration.loadConfiguration()
+                expect(configuration.layoutKeys()).to(equal(existing + [desktop[0], desktop[2]]))
+                configuration.setLayoutKeys(["wide"])
+                configuration.loadConfiguration()
+                expect(configuration.layoutKeys()).to(equal(["wide"]))
+            }
+
+            it("honors a layout list in a dotfile when desktop presets are available") {
+                let configuration = UserConfiguration(storage: TestConfigurationStorage())
+                configuration.defaultConfiguration = JSON(["layouts": LayoutType<TestWindow>.desktopLayouts.map(\.key)])
+                configuration.configurationYAML = ["layouts": ["column", "tall"]]
+                configuration.loadConfiguration()
+                expect(configuration.layoutKeys()).to(equal(["column", "tall"]))
+            }
+
             it("default configuration does not override existing configuration") {
                 let storage = TestConfigurationStorage()
                 let configuration = UserConfiguration(storage: storage)

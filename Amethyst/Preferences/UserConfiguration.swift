@@ -65,6 +65,7 @@ enum ConfigurationKey: String {
     case layouts = "layouts"
     case displayLayoutDefaults = "display-layout-defaults"
     case savedWindowExclusions = "saved-window-exclusions"
+    case installedDesktopLayouts = "installed-desktop-layouts-v1"
     case commandMod = "mod"
     case commandKey = "key"
     case mod1 = "mod1"
@@ -320,6 +321,16 @@ class UserConfiguration: NSObject {
             }
 
             storage.set(hasLocalConfigurationValue ? value : defaultValue?.rawValue, forKey: key)
+        }
+        // Offer these presets once on upgrade. Subsequent launches honor removals in Preferences.
+        if !storage.bool(forKey: .installedDesktopLayouts), let keys = storage.stringArray(forKey: .layouts),
+           let defaults = defaultConfiguration?[ConfigurationKey.layouts.rawValue].arrayObject as? [String] {
+            let configured: Any? = configurationValueForKey(.layouts, fallbackToDefault: false)
+            if configured == nil {
+                let missing = LayoutType<AXWindow>.desktopLayouts.map(\.key).filter { defaults.contains($0) && !keys.contains($0) }
+                if !missing.isEmpty { storage.set(keys + missing, forKey: .layouts) }
+            }
+            storage.set(true, forKey: .installedDesktopLayouts)
         }
     }
 

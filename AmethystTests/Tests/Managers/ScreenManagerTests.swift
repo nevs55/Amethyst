@@ -662,6 +662,68 @@ final class WindowPinTests: XCTestCase {
 }
 
 final class StatusLayoutsMenuTests: XCTestCase {
+    func testDesktopPresetsFillTheDisplayAsWindowsOpenAndClose() throws {
+        let bounds = CGRect(x: -901, y: 31, width: 901, height: 607)
+        let screen = TestScreen(frame: bounds)
+        let windows = try (0..<10).map { _ in try XCTUnwrap(TestWindow(element: nil)) }
+        for type in LayoutType<TestWindow>.desktopLayouts {
+            let layout = try XCTUnwrap(LayoutType<TestWindow>.layoutForKey(type.key))
+            let restored = try LayoutType<TestWindow>.decoded(data: LayoutType<TestWindow>.encoded(layout: layout), key: type.key)
+            XCTAssertEqual(restored.layoutKey, type.key)
+            for count in (0...windows.count).reversed() {
+                let set = TrackedWindows<TestWindow>().windowSet(forWindows: Array(windows.prefix(count)))
+                let tiles = try XCTUnwrap(restored.resolvedAssignments(set, on: screen)).map(\.frameAssignment)
+                XCTAssertEqual(tiles.map { $0.window.id }, set.windows.map(\.id))
+                guard count > 0 else { continue }
+                let frames = tiles.map(\.frame)
+                XCTAssertEqual(frames.reduce(CGFloat.zero) { $0 + $1.width * $1.height }, bounds.width * bounds.height)
+                for (index, frame) in frames.enumerated() {
+                    XCTAssertTrue(bounds.contains(frame))
+                    XCTAssertFalse(frame.isEmpty)
+                    XCTAssertTrue(frames.prefix(index).allSatisfy { $0.intersection(frame).isEmpty })
+                }
+                if count == 1 { XCTAssertEqual(frames, [bounds]) }
+                if count == 5 {
+                    switch type {
+                    case .mainLeftGrid:
+                        XCTAssertEqual(frames[0], CGRect(x: -901, y: 31, width: 451, height: 607))
+                        XCTAssertEqual(Set(frames.dropFirst().map(\.minX)).count, 2)
+                        XCTAssertEqual(Set(frames.dropFirst().map(\.minY)).count, 2)
+                    case .topPair:
+                        XCTAssertEqual(frames[0], CGRect(x: -901, y: 31, width: 451, height: 405))
+                        XCTAssertEqual(frames[1].minY, bounds.minY)
+                        XCTAssertTrue(frames.dropFirst(2).allSatisfy { $0.minY == 436 })
+                    case .mainBelow:
+                        XCTAssertEqual(frames[0], CGRect(x: -901, y: 233, width: 901, height: 405))
+                        XCTAssertTrue(frames.dropFirst().allSatisfy { $0.maxY == frames[0].minY })
+                    default: XCTFail("Unexpected desktop preset")
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor func testDesktopMenuListsAndSelectsEnabledPresets() throws {
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let windowManager = try XCTUnwrap(app.windowManager)
+        let screen = try XCTUnwrap(NSScreen.main)
+        let config = UserConfiguration.shared
+        let originalKeys = config.layoutKeys()
+        defer { config.setLayoutKeys(originalKeys) }
+        let desktop = LayoutType<AXWindow>.desktopLayouts
+        config.setLayoutKeys(["tall"] + desktop.map(\.key))
+        let manager = ScreenManager(screen: AMScreen(screen: screen), delegate: windowManager, userConfiguration: config)
+        manager.updateSpace(to: Space(id: 1, type: CGSSpaceTypeUser, uuid: "desktop-menu-test"))
+        let menu = NSMenu()
+        app.updateLayoutsMenu(menu, for: manager)
+        let items = try XCTUnwrap(menu.item(withTitle: "Desktop")?.submenu).items
+        XCTAssertEqual(items.map(\.title), ["Main Left + Grid", "Top Pair + Bottom Row", "Main Below"])
+        for (type, item) in zip(desktop, items) {
+            app.selectLayout(item)
+            XCTAssertEqual(manager.currentLayout?.layoutKey, type.key)
+        }
+    }
+
     func testEqualTileLayoutsCoverOffsetDisplayAfterEachWindowCloses() throws {
         let bounds = CGRect(x: -900, y: 45, width: 901, height: 603)
         let screen = TestScreen(frame: bounds)

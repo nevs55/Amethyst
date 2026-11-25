@@ -43,6 +43,7 @@ enum LayoutType<Window: WindowType> {
     }
 
     case grid, equalColumns, equalRows
+    case mainLeftGrid, topPair, mainBelow
     case tall
     case tallRight
     case wide
@@ -83,8 +84,10 @@ enum LayoutType<Window: WindowType> {
             .widescreenTallRight,
             .binarySpacePartitioning,
             .grid, .equalColumns, .equalRows
-        ]
+        ] + desktopLayouts
     }
+
+    static var desktopLayouts: [Self] { [.mainLeftGrid, .topPair, .mainBelow] }
 
     private var menuGroup: String {
         switch self {
@@ -94,6 +97,8 @@ enum LayoutType<Window: WindowType> {
             return "Columns and Rows"
         case .grid, .equalColumns, .equalRows:
             return "Equal Tiles"
+        case .mainLeftGrid, .topPair, .mainBelow:
+            return "Desktop"
         case .binarySpacePartitioning:
             return "Partitioning"
         case .fullscreen, .floating:
@@ -122,6 +127,7 @@ enum LayoutType<Window: WindowType> {
         case .grid: return GridLayout<Window>.layoutKey
         case .equalColumns: return EqualColumnsLayout<Window>.layoutKey
         case .equalRows: return EqualRowsLayout<Window>.layoutKey
+        case .mainLeftGrid, .topPair, .mainBelow: return layoutClass.layoutKey
         case .tall:
             return "tall"
         case .tallRight:
@@ -166,6 +172,9 @@ enum LayoutType<Window: WindowType> {
         case .grid: return GridLayout<Window>.self
         case .equalColumns: return EqualColumnsLayout<Window>.self
         case .equalRows: return EqualRowsLayout<Window>.self
+        case .mainLeftGrid: return MainLeftGridLayout<Window>.self
+        case .topPair: return TopPairLayout<Window>.self
+        case .mainBelow: return MainBelowLayout<Window>.self
         case .tall:
             return TallLayout<Window>.self
         case .tallRight:
@@ -210,6 +219,9 @@ enum LayoutType<Window: WindowType> {
         case GridLayout<Window>.layoutKey: return .grid
         case EqualColumnsLayout<Window>.layoutKey: return .equalColumns
         case EqualRowsLayout<Window>.layoutKey: return .equalRows
+        case MainLeftGridLayout<Window>.layoutKey: return .mainLeftGrid
+        case TopPairLayout<Window>.layoutKey: return .topPair
+        case MainBelowLayout<Window>.layoutKey: return .mainBelow
         case "tall":
             return .tall
         case "tall-right":
