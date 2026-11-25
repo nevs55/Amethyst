@@ -66,6 +66,7 @@ enum ConfigurationKey: String {
     case displayLayoutDefaults = "display-layout-defaults"
     case savedWindowExclusions = "saved-window-exclusions"
     case installedDesktopLayouts = "installed-desktop-layouts-v1"
+    case savedDesktops = "saved-desktop-layouts"
     case commandMod = "mod"
     case commandKey = "key"
     case mod1 = "mod1"
@@ -529,6 +530,30 @@ class UserConfiguration: NSObject {
     func layoutKeys() -> [String] {
         let layoutKeys = storage.array(forKey: .layouts) as? [String]
         return layoutKeys ?? []
+    }
+
+    var savedDesktops: [SavedDesktop] {
+        guard let data = storage.object(forKey: .savedDesktops) as? Data else { return [] }
+        return (try? JSONDecoder().decode([SavedDesktop].self, from: data)) ?? []
+    }
+
+    func saveDesktop(_ template: SavedDesktop) throws {
+        var templates = savedDesktops
+        if let index = templates.firstIndex(where: { $0.id == template.id }) {
+            templates[index] = template
+        } else {
+            templates.append(template)
+        }
+        storage.set(try JSONEncoder().encode(templates), forKey: .savedDesktops)
+        let keys = layoutKeys()
+        setLayoutKeys(keys.contains(template.key) ? keys : keys + [template.key])
+    }
+
+    func deleteDesktop(_ template: SavedDesktop) throws {
+        let remaining = savedDesktops.filter { $0.id != template.id }
+        storage.set(try JSONEncoder().encode(remaining), forKey: .savedDesktops)
+        storage.set(displayLayoutDefaults.filter { $0.value != template.key }, forKey: .displayLayoutDefaults)
+        setLayoutKeys(layoutKeys().filter { $0 != template.key })
     }
 
     private var displayLayoutDefaults: [String: String] {

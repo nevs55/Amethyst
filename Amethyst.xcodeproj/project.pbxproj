@@ -12,6 +12,7 @@
 		4000DB10239CA07000365A0C /* WideLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4000DB0F239CA07000365A0C /* WideLayoutTests.swift */; };
 		400540F22325CDF4004B8656 /* Reliability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 400540F12325CDF4004B8656 /* Reliability.swift */; };
 		4006CF881CDFF5F6004CA512 /* NSRunningApplication+Manageable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4006CF871CDFF5F6004CA512 /* NSRunningApplication+Manageable.swift */; };
+		18CA92A0E314468093937D50 /* SavedDesktop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CA92A0E314468093937D51 /* SavedDesktop.swift */; };
 		4006CF8E1CDFFE90004CA512 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4006CF8D1CDFFE90004CA512 /* AppDelegate.swift */; };
 		4006CF901CE017BA004CA512 /* UserConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4006CF8F1CE017BA004CA512 /* UserConfiguration.swift */; };
 		400A5E9D2327350C00F0A2C3 /* Space.swift in Sources */ = {isa = PBXBuildFile; fileRef = 400A5E9C2327350C00F0A2C3 /* Space.swift */; };
@@ -154,6 +155,7 @@
 		4006CF8D1CDFFE90004CA512 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		4006CF8F1CE017BA004CA512 /* UserConfiguration.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UserConfiguration.swift; sourceTree = "<group>"; };
 		400A5E9C2327350C00F0A2C3 /* Space.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Space.swift; sourceTree = "<group>"; };
+		18CA92A0E314468093937D51 /* SavedDesktop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedDesktop.swift; sourceTree = "<group>"; };
 		40111CC8223370FD003D20BD /* SIWindow+AmethystTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SIWindow+AmethystTests.swift"; sourceTree = "<group>"; };
 		40111CCA22342CC4003D20BD /* DebugPreferencesViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugPreferencesViewController.swift; sourceTree = "<group>"; };
 		40111CCC22342CF3003D20BD /* DebugPreferencesViewController.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = DebugPreferencesViewController.xib; sourceTree = "<group>"; };
@@ -494,6 +496,7 @@
 				400540F12325CDF4004B8656 /* Reliability.swift */,
 				40578C18232D9CC0006553A0 /* Screen.swift */,
 				400A5E9C2327350C00F0A2C3 /* Space.swift */,
+				18CA92A0E314468093937D51 /* SavedDesktop.swift */,
 				4046EFCE2236019400113067 /* Window.swift */,
 				401BC8A71CE8E94000F89B3F /* WindowsInformation.swift */,
 				40583E1229AEF70B008602BB /* ApplicationEventHandler.swift */,
@@ -847,6 +850,7 @@
 				401BC8A81CE8E94000F89B3F /* WindowsInformation.swift in Sources */,
 				401BC8981CE7E45300F89B3F /* WindowManager.swift in Sources */,
 				400A5E9D2327350C00F0A2C3 /* Space.swift in Sources */,
+				18CA92A0E314468093937D50 /* SavedDesktop.swift in Sources */,
 				401BC8BA1CE9319500F89B3F /* FocusFollowsMouseManager.swift in Sources */,
 				40C1357C1F202AEE00FF9FA7 /* PreferencesWindow.swift in Sources */,
 				40583E1329AEF70B008602BB /* ApplicationEventHandler.swift in Sources */,

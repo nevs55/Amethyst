@@ -388,7 +388,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let noLayoutsItem = NSMenuItem(title: "No layouts enabled", action: nil, keyEquivalent: "")
             noLayoutsItem.isEnabled = false
             submenu.addItem(noLayoutsItem)
-            return
         }
 
         for (index, layoutInfo) in layouts.enumerated() {
@@ -401,6 +400,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             menuItem.state = layoutInfo.isSelected ? .on : .off
 
             LayoutType<AXWindow>.addMenuItem(menuItem, forKey: layoutInfo.key, to: submenu)
+        }
+
+        let savedMenu: NSMenu
+        if let existing = submenu.item(withTitle: "Saved Layouts")?.submenu {
+            savedMenu = existing
+        } else {
+            savedMenu = NSMenu(title: "Saved Layouts")
+            submenu.addItem(withTitle: savedMenu.title, action: nil, keyEquivalent: "").submenu = savedMenu
+        }
+        let templates = config.savedDesktops
+        for template in templates where !layouts.contains(where: { $0.key == template.key }) {
+            let item = savedMenu.addItem(withTitle: template.name, action: ready ? #selector(enableSavedLayout(_:)) : nil, keyEquivalent: "")
+            item.target = self
+            item.identifier = NSUserInterfaceItemIdentifier(template.key)
+            item.representedObject = manager
+            item.isEnabled = ready
+        }
+        if !savedMenu.items.isEmpty { savedMenu.addItem(.separator()) }
+        let save = savedMenu.addItem(withTitle: "Save Current Layout…", action: ready ? #selector(saveDesktopLayout(_:)) : nil, keyEquivalent: "")
+        save.target = self
+        save.representedObject = manager
+        save.isEnabled = ready
+        if !templates.isEmpty {
+            let deleteMenu = NSMenu(title: "Delete Saved Layout")
+            savedMenu.addItem(withTitle: deleteMenu.title, action: nil, keyEquivalent: "").submenu = deleteMenu
+            for template in templates {
+                let item = deleteMenu.addItem(withTitle: template.name, action: #selector(deleteDesktopLayout(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = template
+            }
         }
 
         submenu.addItem(.separator())
@@ -421,6 +450,75 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func useCurrentLayoutAsDisplayDefault(_ sender: NSMenuItem) {
         let manager = sender.representedObject as? ScreenManager<WindowManager<SIApplication>>
         manager?.useCurrentLayoutAsDisplayDefault()
+    }
+
+    @objc private func enableSavedLayout(_ sender: NSMenuItem) {
+        let config = UserConfiguration.shared
+        guard let manager = sender.representedObject as? ScreenManager<WindowManager<SIApplication>>,
+              let key = sender.identifier?.rawValue, config.savedDesktops.contains(where: { $0.key == key }) else { return }
+        let keys = config.layoutKeys()
+        if !keys.contains(key) { config.setLayoutKeys(keys + [key]) }
+        if let index = manager.layoutsInfo.firstIndex(where: { $0.key == key }) {
+            manager.selectLayout(at: index, matching: key)
+        }
+    }
+
+    @objc private func saveDesktopLayout(_ sender: NSMenuItem) {
+        guard let manager = sender.representedObject as? ScreenManager<WindowManager<SIApplication>>,
+              let screen = manager.screen, let space = manager.space, let windowManager,
+              CGSpacesInfo<AXWindow>.currentSpaceForScreen(screen)?.id == space.id else { return }
+        let frames = windowManager.activeWindowSet(forScreenManager: manager, on: screen).windows.map(\.frame)
+        let bounds = screen.adjustedFrame()
+        let alert = NSAlert()
+        guard frames.contains(where: { !$0.isInfinite && !$0.intersection(bounds).isEmpty }) else {
+            alert.messageText = "No windows to save on this desktop"
+            alert.informativeText = "Open at least one window managed by Amethyst on this display and Space."
+            alert.runModal()
+            return
+        }
+        alert.messageText = "Save Current Layout"
+        alert.informativeText = "Save these window positions and sizes. Any apps can fill the slots."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.placeholderString = "Layout name"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        NSApp.activate(ignoringOtherApps: true)
+        while alert.runModal() == .alertFirstButtonReturn {
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                alert.informativeText = "Enter a name for this layout."
+                continue
+            }
+            let config = UserConfiguration.shared
+            let previous = config.savedDesktops.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+            if let previous {
+                let confirm = NSAlert()
+                confirm.messageText = "Replace “\(previous.name)”?"
+                confirm.addButton(withTitle: "Replace")
+                confirm.addButton(withTitle: "Cancel")
+                guard confirm.runModal() == .alertFirstButtonReturn else { return }
+            }
+            guard let template = SavedDesktop(name: name, frames: frames, in: bounds, id: previous?.id ?? UUID()) else { return }
+            do {
+                try config.saveDesktop(template)
+                if manager.space?.id == space.id, let index = manager.layoutsInfo.firstIndex(where: { $0.key == template.key }) {
+                    manager.selectLayout(at: index, matching: template.key)
+                }
+            } catch { NSApp.presentError(error) }
+            return
+        }
+    }
+
+    @objc private func deleteDesktopLayout(_ sender: NSMenuItem) {
+        guard let template = sender.representedObject as? SavedDesktop else { return }
+        let alert = NSAlert()
+        alert.messageText = "Delete “\(template.name)”?"
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Delete")
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        do { try UserConfiguration.shared.deleteDesktop(template) } catch { NSApp.presentError(error) }
     }
 
     @IBAction func selectLayout(_ sender: NSMenuItem) {

@@ -661,6 +661,85 @@ final class WindowPinTests: XCTestCase {
     }
 }
 
+final class SavedDesktopTests: XCTestCase {
+    func testGeometryFollowsSlotsAcrossDisplaysAndWindowIdentities() throws {
+        let screen = TestScreen(frame: CGRect(x: -1000, y: 10, width: 1000, height: 800))
+        let frames = [CGRect(x: -980, y: 30, width: 475, height: 740), CGRect(x: -450, y: 300, width: 400, height: 400)]
+        let template = try XCTUnwrap(SavedDesktop(name: " Desk ", frames: frames, in: screen.adjustedFrame()))
+        XCTAssertEqual(template.name, "Desk")
+        let layout = SavedDesktopLayout<TestWindow>(template)
+        let windows = try (0..<5).map { _ in try XCTUnwrap(TestWindow(element: nil)) }
+        func assigned(_ windows: [TestWindow], on target: TestScreen) throws -> [FrameAssignment<TestWindow>] {
+            let set = TrackedWindows<TestWindow>().windowSet(forWindows: windows)
+            return try XCTUnwrap(layout.resolvedAssignments(set, on: target)).map(\.frameAssignment)
+        }
+        XCTAssertEqual(try assigned([], on: screen).count, 0)
+        XCTAssertEqual(try assigned([windows[0]], on: screen).map(\.frame), [frames[0]])
+        let first = try assigned([windows[1], windows[3]], on: screen)
+        XCTAssertEqual(first.map(\.frame), frames)
+        XCTAssertTrue(first.allSatisfy(\.disableWindowMargins))
+        XCTAssertEqual(try assigned([windows[4], windows[2]], on: screen).map(\.frame), frames)
+        let other = TestScreen(frame: CGRect(x: 70, y: -400, width: 500, height: 400))
+        XCTAssertEqual(try assigned([windows[2], windows[1]], on: other).map(\.frame), [
+            CGRect(x: 80, y: -390, width: 238, height: 370), CGRect(x: 345, y: -255, width: 200, height: 200)
+        ])
+        let extra = try assigned(windows, on: screen).map(\.frame)
+        XCTAssertEqual(extra.count, windows.count)
+        XCTAssertEqual(extra[0], frames[0])
+        XCTAssertEqual(extra.dropFirst().reduce(CGRect.null) { $0.union($1) }, frames[1])
+        XCTAssertEqual(extra.dropFirst().reduce(CGFloat.zero) { $0 + $1.width * $1.height }, frames[1].width * frames[1].height)
+    }
+
+    func testSaveReplaceRelaunchAndDeleteTemplate() throws {
+        let storage = TestConfigurationStorage()
+        let configuration = UserConfiguration(storage: storage)
+        configuration.setLayoutKeys(["tall", "wide"])
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 100)
+        XCTAssertNil(SavedDesktop(name: " ", frames: [bounds], in: bounds))
+        XCTAssertNil(SavedDesktop(name: "Desk", frames: [.zero, .infinite], in: bounds))
+        let template = try XCTUnwrap(SavedDesktop(name: "Desk", frames: [bounds], in: bounds))
+        let another = try XCTUnwrap(SavedDesktop(name: "Desk Two", frames: [bounds], in: bounds))
+        try configuration.saveDesktop(template)
+        try configuration.saveDesktop(another)
+        configuration.setDefaultLayoutKey(template.key, forDisplay: "external")
+        let replacement = try XCTUnwrap(SavedDesktop(name: "Desk", frames: [bounds.insetBy(dx: 10, dy: 10)], in: bounds, id: template.id))
+        try configuration.saveDesktop(replacement)
+        let reopened = UserConfiguration(storage: storage)
+        XCTAssertEqual(reopened.savedDesktops, [replacement, another])
+        XCTAssertEqual(reopened.layoutKeys(), ["tall", "wide", template.key, another.key])
+        let saved = try XCTUnwrap(LayoutType<TestWindow>.layoutsWithConfiguration(reopened).first { $0.layoutKey == template.key })
+        let decoded = try LayoutType<TestWindow>.decoded(data: LayoutType<TestWindow>.encoded(layout: saved), key: saved.layoutKey)
+        XCTAssertEqual((decoded as? SavedDesktopLayout<TestWindow>)?.template, replacement)
+        try reopened.deleteDesktop(replacement)
+        XCTAssertEqual(reopened.savedDesktops, [another])
+        XCTAssertEqual(reopened.layoutKeys(), ["tall", "wide", another.key])
+        XCTAssertNil(reopened.defaultLayoutKey(forDisplay: "external"))
+    }
+
+    @MainActor func testMenuOffersSaveAndSelectsNamedGeometry() throws {
+        let config = UserConfiguration.shared
+        let originalKeys = config.layoutKeys()
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let template = try XCTUnwrap(SavedDesktop(name: "Test Desktop", frames: [bounds], in: bounds))
+        try config.saveDesktop(template)
+        defer {
+            try? config.deleteDesktop(template)
+            config.setLayoutKeys(originalKeys)
+        }
+        let app = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let wm = try XCTUnwrap(app.windowManager)
+        let manager = ScreenManager(screen: AMScreen(screen: try XCTUnwrap(NSScreen.main)), delegate: wm, userConfiguration: config)
+        manager.updateSpace(to: Space(id: 1, type: CGSSpaceTypeUser, uuid: "saved-menu-test"))
+        let menu = NSMenu()
+        app.updateLayoutsMenu(menu, for: manager)
+        let savedMenu = try XCTUnwrap(menu.item(withTitle: "Saved Layouts")?.submenu)
+        XCTAssertTrue(savedMenu.item(withTitle: "Save Current Layout…")?.isEnabled == true)
+        let item = try XCTUnwrap(savedMenu.item(withTitle: template.name))
+        app.selectLayout(item)
+        XCTAssertEqual(manager.currentLayout?.layoutKey, template.key)
+    }
+}
+
 final class StatusLayoutsMenuTests: XCTestCase {
     func testDesktopPresetsFillTheDisplayAsWindowsOpenAndClose() throws {
         let bounds = CGRect(x: -901, y: 31, width: 901, height: 607)

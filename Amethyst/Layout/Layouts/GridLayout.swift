@@ -3,6 +3,7 @@ import Silica
 class GridLayout<Window: WindowType>: Layout<Window> {
     override class var layoutName: String { "Grid" }
     override class var layoutKey: String { "builtin-grid" }
+    var disableWindowMargins: Bool { false }
 
     func columnCount(for count: Int) -> Int {
         Int(ceil(sqrt(Double(count))))
@@ -13,7 +14,8 @@ class GridLayout<Window: WindowType>: Layout<Window> {
         let frames = tileFrames(count: windowSet.windows.count, in: bounds)
         return zip(windowSet.windows, frames).map { window, frame in
             let assignment = FrameAssignment<Window>(frame: frame, window: window, screenFrame: bounds,
-                resizeRules: ResizeRules(isMain: true, unconstrainedDimension: .horizontal, scaleFactor: 1))
+                resizeRules: ResizeRules(isMain: true, unconstrainedDimension: .horizontal, scaleFactor: 1),
+                disableWindowMargins: disableWindowMargins)
             return FrameAssignmentOperation(frameAssignment: assignment, windowSet: windowSet)
         }
     }
@@ -22,7 +24,7 @@ class GridLayout<Window: WindowType>: Layout<Window> {
         gridFrames(count: count, columns: columnCount(for: count), in: bounds)
     }
 
-    fileprivate func gridFrames(count: Int, columns: Int, in bounds: CGRect) -> [CGRect] {
+    func gridFrames(count: Int, columns: Int, in bounds: CGRect) -> [CGRect] {
         guard count > 0 else { return [] }
         let rows = (count - 1) / columns + 1
 

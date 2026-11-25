@@ -143,6 +143,7 @@ final class ScreenManager<Delegate: ScreenManagerDelegate>: NSObject, Codable {
         var remaining = existing
         let configured: [Layout<Window>] = LayoutType.layoutsWithConfiguration(configuration)
         return configured.map { layout in
+            if layout is SavedDesktopLayout<Window> { return layout }
             if let index = remaining.firstIndex(where: { $0.layoutKey == layout.layoutKey }) {
                 return remaining.remove(at: index)
             }

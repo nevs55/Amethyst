@@ -63,6 +63,7 @@ enum LayoutType<Window: WindowType> {
     case binarySpacePartitioning
 
     case custom(key: String)
+    case saved(key: String)
 
     static var standardLayouts: [LayoutType<Window>] {
         return [
@@ -105,6 +106,8 @@ enum LayoutType<Window: WindowType> {
             return "Fullscreen and Floating"
         case .custom:
             return "Custom"
+        case .saved:
+            return "Saved Layouts"
         }
     }
 
@@ -162,7 +165,7 @@ enum LayoutType<Window: WindowType> {
             return "widescreen-tall-right"
         case .binarySpacePartitioning:
             return "bsp"
-        case .custom(let key):
+        case .custom(let key), .saved(let key):
             return key
         }
     }
@@ -211,6 +214,8 @@ enum LayoutType<Window: WindowType> {
             return BinarySpacePartitioningLayout<Window>.self
         case .custom:
             return CustomLayout<Window>.self
+        case .saved:
+            return SavedDesktopLayout<Window>.self
         }
     }
 
@@ -257,13 +262,19 @@ enum LayoutType<Window: WindowType> {
         case "bsp":
             return .binarySpacePartitioning
         default:
+            if key.hasPrefix("saved-desktop-"), UUID(uuidString: String(key.dropFirst("saved-desktop-".count))) != nil {
+                return .saved(key: key)
+            }
             return .custom(key: key)
         }
     }
 
-    static func layoutForKey(_ layoutKey: String) -> Layout<Window>? {
+    static func layoutForKey(_ layoutKey: String, configuration: UserConfiguration = .shared) -> Layout<Window>? {
         let type = LayoutType<Window>.from(key: layoutKey)
 
+        if case .saved = type {
+            return configuration.savedDesktops.first { $0.key == layoutKey }.map { SavedDesktopLayout<Window>($0) }
+        }
         guard case .custom = type else {
             return type.layoutClass.init()
         }
@@ -284,6 +295,9 @@ enum LayoutType<Window: WindowType> {
     static func layoutNameForKey(_ layoutKey: String) -> String? {
         let type = LayoutType<Window>.from(key: layoutKey)
 
+        if case .saved = type {
+            return UserConfiguration.shared.savedDesktops.first { $0.key == layoutKey }?.name
+        }
         guard case .custom = type else {
             return type.layoutClass.layoutName
         }
@@ -300,6 +314,7 @@ enum LayoutType<Window: WindowType> {
         var layoutTypes = standardLayouts
             .compactMap { $0.layoutClass }
             .map { ($0.layoutKey, $0.layoutName) }
+        layoutTypes.append(contentsOf: UserConfiguration.shared.savedDesktops.map { ($0.key, $0.name) })
 
         do {
             let layoutsDirectory = try FileManager.default.layoutsDirectory()
@@ -311,7 +326,7 @@ enum LayoutType<Window: WindowType> {
 
             let customLayouts = customLayoutFiles
                 .map { $0.deletingPathExtension().lastPathComponent }
-                .map { ($0, layoutNameForKey($0)!) }
+                .compactMap { key in layoutNameForKey(key).map { (key, $0) } }
             layoutTypes.append(contentsOf: customLayouts)
         } catch {
             log.error("failed to parse custom layouts")
@@ -323,7 +338,7 @@ enum LayoutType<Window: WindowType> {
     static func layoutsWithConfiguration(_ userConfiguration: UserConfiguration) -> [Layout<Window>] {
         let layoutKeys: [String] = userConfiguration.layoutKeys()
         let layouts = layoutKeys.map { layoutKey -> Layout<Window>? in
-            guard let layout = LayoutType.layoutForKey(layoutKey) else {
+            guard let layout = LayoutType.layoutForKey(layoutKey, configuration: userConfiguration) else {
                 log.warning("Unrecognized layout key \(layoutKey)")
                 return nil
             }

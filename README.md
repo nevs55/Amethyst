@@ -143,6 +143,14 @@ Choose **Layouts → Desktop** in the Amethyst menu. A single window fills the d
 
 Reorder or remove these presets in **Preferences → Layouts**. If you manage layouts in a configuration file, their keys are `builtin-main-left-grid`, `builtin-top-pair`, and `builtin-main-below`.
 
+#### Save your own layout
+
+1. Choose **Disable Tiling** in the Amethyst menu. Move and resize your normally tiled windows on one display and Space. Leave any gaps you want to keep.
+2. Choose **Layouts → Saved Layouts → Save Current Layout…**, enter a name, and save. Choose **Enable Tiling** when you’re ready.
+3. Select the named layout under **Layouts → Saved Layouts** on any display. It scales the slots to that display and fills them in Amethyst’s window order. With fewer windows, the unused slots stay open. Extra windows share the last slot as a grid.
+
+Only the name and geometry are saved alongside a layout identifier. Save under the same name to replace a layout, or use **Delete Saved Layout** in the same menu to remove it.
+
 #### Tall
 
 The default layout. This gives you one "main pane" on the left, and one other pane on the right. By default, one window is placed in the main pane (extending the full height of the screen), and all remaining windows are placed in the other pane. If either pane has more than one window, that pane will be evenly split into rows, to show them all. You can use the keyboard shortcuts above to control which window(s), and how many, are in the main pane, as well as the horizontal size of the main pane vs. the other pane.

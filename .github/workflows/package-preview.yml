@@ -1,7 +1,7 @@
 name: Package Amethyst preview
 on:
   push:
-    branches: [build/per-display-default-layout, fix/preview-close-reflow, fix/preview-window-access, codex/automatic-close-reflow, codex/window-exclusion-menu, codex/window-exclusion-list, codex/status-menu-freeze, codex/grouped-layouts, codex/pin-window-position, codex/desktop-layouts]
+    branches: [build/per-display-default-layout, fix/preview-close-reflow, fix/preview-window-access, codex/automatic-close-reflow, codex/window-exclusion-menu, codex/window-exclusion-list, codex/status-menu-freeze, codex/grouped-layouts, codex/pin-window-position, codex/desktop-layouts, codex/saved-desktops]
 permissions:
   contents: read
 jobs:
@@ -27,7 +27,7 @@ jobs:
           xcodebuild -workspace Amethyst.xcworkspace -scheme Amethyst -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/build" \
             ONLY_ACTIVE_ARCH=NO 'ARCHS=arm64 x86_64' CODE_SIGNING_ALLOWED=NO \
-            CURRENT_PROJECT_VERSION=142 build | xcbeautify
+            CURRENT_PROJECT_VERSION=143 build | xcbeautify
       - name: Package and verify the app
         run: |
           set -eu
@@ -40,7 +40,7 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool false' "$app/Contents/Info.plist"
           codesign --force --deep --sign - "$app"
           ln -s /Applications "$stage/Applications"
-          image=Amethyst-preview-142.dmg
+          image=Amethyst-preview-143.dmg
           hdiutil create -quiet -volname 'Amethyst Preview' -srcfolder "$stage" -format UDZO "$image"
           mount="$RUNNER_TEMP/verify-preview"
           hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$image"
@@ -51,26 +51,26 @@ jobs:
           for arch in arm64 x86_64; do
             [[ " $archs " == *" $arch "* ]] || { echo "Missing $arch in $archs"; exit 1; }
           done
-          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = 142
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = 143
           "$app/Contents/MacOS/Amethyst" debug windows --redact-window-titles > "$RUNNER_TEMP/windows-report.txt"
           grep -q '^Accessibility access for this diagnostic:' "$RUNNER_TEMP/windows-report.txt"
           test "$(/usr/libexec/PlistBuddy -c 'Print DTSDKName' "$app/Contents/Info.plist")" = macosx27.0
           codesign -dvv "$app" 2>&1 | grep -Fx 'Identifier=com.github.nevs55.AmethystPreview'
           digest=$(shasum -a 256 "$image" | awk '{print $1}')
-          sed -e "s/__DMG_SHA256__/$digest/" -e "s/__BUILD__/142/g" packaging/Update-Amethyst.command.in > Update-Amethyst-142.command
-          chmod +x Update-Amethyst-142.command
-          bash -n Update-Amethyst-142.command
-          sed -e "s/__SOURCE_REVISION__/$GITHUB_SHA/g" -e 's/__PERSONAL_BUILD__/142/g' \
-            packaging/Build-Amethyst-Personal.command.in > Build-Amethyst-142-Personal.command
-          chmod +x Build-Amethyst-142-Personal.command
-          bash -n Build-Amethyst-142-Personal.command
+          sed -e "s/__DMG_SHA256__/$digest/" -e "s/__BUILD__/143/g" packaging/Update-Amethyst.command.in > Update-Amethyst-143.command
+          chmod +x Update-Amethyst-143.command
+          bash -n Update-Amethyst-143.command
+          sed -e "s/__SOURCE_REVISION__/$GITHUB_SHA/g" -e 's/__PERSONAL_BUILD__/143/g' \
+            packaging/Build-Amethyst-Personal.command.in > Build-Amethyst-143-Personal.command
+          chmod +x Build-Amethyst-143-Personal.command
+          bash -n Build-Amethyst-143-Personal.command
       - uses: actions/upload-artifact@v4
         with:
           name: Amethyst-per-display-preview
           path: |
-            Amethyst-preview-142.dmg
-            Update-Amethyst-142.command
-            Build-Amethyst-142-Personal.command
+            Amethyst-preview-143.dmg
+            Update-Amethyst-143.command
+            Build-Amethyst-143-Personal.command
           compression-level: 0
           if-no-files-found: error
 
@@ -81,25 +81,25 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: Amethyst-per-display-preview
-      - name: Exercise the build 141 upgrade
+      - name: Exercise the build 142 upgrade
         timeout-minutes: 3
         run: |
           set -euo pipefail
           test ! -e /Applications/Amethyst.app
-          old="$RUNNER_TEMP/build-141"
-          curl -fsSL https://github.com/nevs55/Amethyst/releases/download/per-display-preview.11/Amethyst-preview-141.dmg -o "$old.dmg"
-          echo "a744b6f221fbcce2bde0e110f7958bfd9f80710d78245e48b9a7bfa2074b8a5a  $old.dmg" | shasum -a 256 -c -
+          old="$RUNNER_TEMP/build-142"
+          curl -fsSL https://github.com/nevs55/Amethyst/releases/download/per-display-preview.12/Amethyst-preview-142.dmg -o "$old.dmg"
+          echo "aa5d00cb3df0df58cab433b6c3128ed8469bdd29ff7d0331ef7a16b347b30e7f  $old.dmg" | shasum -a 256 -c -
           hdiutil attach -readonly -nobrowse -mountpoint "$old" "$old.dmg"
           sudo ditto "$old/Amethyst.app" /Applications/Amethyst.app
           hdiutil detach "$old"
           open /Applications/Amethyst.app
-          defaults write com.github.nevs55.AmethystPreview layouts -array wide tall wide
+          defaults write com.github.nevs55.AmethystPreview layouts -array wide tall wide builtin-main-left-grid builtin-top-pair builtin-main-below
           defaults write com.github.nevs55.AmethystPreview display-layout-defaults -dict external tall
-          /bin/bash Update-Amethyst-142.command | tee "$RUNNER_TEMP/upgrade.log"
+          /bin/bash Update-Amethyst-143.command | tee "$RUNNER_TEMP/upgrade.log"
           backup=$(sed -n 's/^Previous app saved at //p' "$RUNNER_TEMP/upgrade.log")
           plist=/usr/libexec/PlistBuddy
-          test "$("$plist" -c 'Print CFBundleVersion' "$backup/Contents/Info.plist")" = 141
-          test "$("$plist" -c 'Print CFBundleVersion' /Applications/Amethyst.app/Contents/Info.plist)" = 142
+          test "$("$plist" -c 'Print CFBundleVersion' "$backup/Contents/Info.plist")" = 142
+          test "$("$plist" -c 'Print CFBundleVersion' /Applications/Amethyst.app/Contents/Info.plist)" = 143
           test "$("$plist" -c 'Print CFBundleIdentifier' /Applications/Amethyst.app/Contents/Info.plist)" = com.github.nevs55.AmethystPreview
           defaults read com.github.nevs55.AmethystPreview display-layout-defaults | grep -q tall
           for attempt in {1..30}; do
